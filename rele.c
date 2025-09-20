@@ -11,6 +11,12 @@
 #include <stdio.h>      // remove, for debug only
 
 
+// TODO: this will need to be in an include file....
+// Compile flags...
+#define F_CASELESS  (1 << 0)
+
+
+
 enum {
     OP_NOP = 0, OP_CONCAT, OP_MATCH, OP_GMATCH, OP_DONE,
     OP_ALTERNATE = '|',
@@ -118,11 +124,17 @@ fail:
 // Given a set of characters [abc\d1-0] etc, create a 128 bit mask that we
 // can use to do rapid comparisons. The set will be linked into node b
 // of the supplied node, and the new pointer returned.
+//
+// A 128 byte setup would be quicker and we could use a mask which would
+// allow us to use it 8 times (for different matches) but then we would
+// need to store a ptr and a mask, so this may be a bit slower but I think
+// it's more efficient.
+//
 struct set {
     uint32_t d[4];
 };
 
-static char *build_set(char *p, struct node *n) {
+static char *build_set(struct rectx *ctx, char *p, struct node *n) {
     // Allocate the space...
     struct set *set = malloc(sizeof(struct set));
     if (!set) return NULL;
@@ -130,8 +142,12 @@ static char *build_set(char *p, struct node *n) {
 
     int negate = 0;
 
-    #define SET_VAL(v)      set->d[(v)/32] |= (1 << ((v)%32))
-    #define SET_RANGE(beg, end)     for (uint8_t c = beg; c <= end; c++) set->d[c/32] |= (1 << (c%32))
+    #define SET_VAL(v)                      set->d[(v)/32] |= (1 << ((v)%32))
+    #define SET_CASELESS_VAL(v)             SET_VAL(v); \
+                                            if (v >= 'a' && v <= 'z') { SET_VAL(v - ('a' - 'A')); } \
+                                            else if (v >= 'A' && v <= 'Z') { SET_VAL(v + ('a' - 'A')); }
+    #define SET_RANGE(beg, end)             for (uint8_t c = beg; c <= end; c++) { SET_VAL(c); }
+    #define SET_CASELESS_RANGE(beg, end)    for (uint8_t c = beg; c <= end; c++) { SET_CASELESS_VAL(c); }
 
     p++;            // get past the '['
     if (*p == '^') { negate = 1; p++; }
@@ -139,11 +155,10 @@ static char *build_set(char *p, struct node *n) {
         if (*p == ']') break;           // done
         if (p[1] == '-' && p[2] && p[2] != ']') {
             if (p[0] > p[2]) goto fail;
-            // todo: case
-            for (int i=p[0]; i <= p[2]; i++) {
-                int word = i / 32;
-                int bit = i % 32;
-                set->d[word] |= (1 << bit);
+            if (ctx->flags & F_CASELESS) {
+                SET_CASELESS_RANGE(p[0], p[2]);
+            } else {
+                SET_RANGE(p[0], p[2]);
             }
             p += 3;           
         } else {
@@ -229,7 +244,7 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
             case OP_MATCHSET:
                 last = create_node_here(ctx, last, OP_MATCHSET, NULL, NULL);
                 if (!last) goto fail;
-                p = build_set(p, last);
+                p = build_set(ctx, p, last);
                 fprintf(stderr, "HERE p is %d (%c)\n", *p, *p);
                 if (!p) goto fail;
                 break;
@@ -325,6 +340,7 @@ void export_tree(struct node *root, const char *filename) {
 int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abc?def+ghi", 0);
     struct rectx *ctx = re_compile("abc(def|ghi)jkl[^a-z]", 0);
+//    struct rectx *ctx = re_compile("[a-z]", F_CASELESS);
     export_tree(ctx->root, "tree.dot");
 
 //    struct set *s = build_set("[a-zA-Z0-9]");
