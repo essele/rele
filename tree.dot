@@ -1,89 +1,41 @@
 digraph tree {
-    n0x4a8f170 [label="(3)
+    n0xb45701561320 [label="(3)
 CONCAT
 "];
-    n0x4a8f170 -> n0x4a8f090 [label="a"];
-    n0x4a8f090 [label="(1)
+    n0xb45701561320 -> n0xb457015612c0 [label="a"];
+    n0xb457015612c0 [label="(1)
 MATCH
 'a'"];
-    n0x4a8f170 -> n0x4a8f250 [label="b"];
-    n0x4a8f250 [label="(5)
+    n0xb45701561320 -> n0xb45701561380 [label="b"];
+    n0xb45701561380 [label="(5)
 CONCAT
 "];
-    n0x4a8f250 -> n0x4a8f100 [label="a"];
-    n0x4a8f100 [label="(2)
+    n0xb45701561380 -> n0xb457015612f0 [label="a"];
+    n0xb457015612f0 [label="(2)
 MATCH
 'b'"];
-    n0x4a8f250 -> n0x4a8f6b0 [label="b"];
-    n0x4a8f6b0 [label="(15)
+    n0xb45701561380 -> n0xb45701561410 [label="b"];
+    n0xb45701561410 [label="(8)
 CONCAT
 "];
-    n0x4a8f6b0 -> n0x4a8f5d0 [label="a"];
-    n0x4a8f5d0 [label="(13)
-MULT
-min=2 max=4"];
-    n0x4a8f5d0 -> n0x4a8f1e0 [label="b"];
-    n0x4a8f1e0 [label="(4)
-GROUP
-nocapture"];
-    n0x4a8f1e0 -> n0x4a8f410 [label="b"];
-    n0x4a8f410 [label="(9)
-ALTERNATE
+    n0xb45701561410 -> n0xb457015613b0 [label="a"];
+    n0xb457015613b0 [label="(6)
+UNKNOWN
 "];
-    n0x4a8f410 -> n0x4a8f3a0 [label="a"];
-    n0x4a8f3a0 [label="(8)
+    n0xb457015613b0 -> n0xb45701561350 [label="b"];
+    n0xb45701561350 [label="(4)
+MATCH
+'.'"];
+    n0xb45701561410 -> n0xb45701561470 [label="b"];
+    n0xb45701561470 [label="(10)
 CONCAT
 "];
-    n0x4a8f3a0 -> n0x4a8f2c0 [label="a"];
-    n0x4a8f2c0 [label="(6)
+    n0xb45701561470 -> n0xb457015613e0 [label="a"];
+    n0xb457015613e0 [label="(7)
 MATCH
 'c'"];
-    n0x4a8f3a0 -> n0x4a8f330 [label="b"];
-    n0x4a8f330 [label="(7)
-MATCH
-'d'"];
-    n0x4a8f410 -> n0x4a8f560 [label="b"];
-    n0x4a8f560 [label="(12)
-CONCAT
-"];
-    n0x4a8f560 -> n0x4a8f480 [label="a"];
-    n0x4a8f480 [label="(10)
-MATCH
-'e'"];
-    n0x4a8f560 -> n0x4a8f4f0 [label="b"];
-    n0x4a8f4f0 [label="(11)
-MATCH
-'f'"];
-    n0x4a8f6b0 -> n0x4a8f800 [label="b"];
-    n0x4a8f800 [label="(18)
-CONCAT
-"];
-    n0x4a8f800 -> n0x4a8f720 [label="a"];
-    n0x4a8f720 [label="(16)
-PLUS
-lazy"];
-    n0x4a8f720 -> n0x4a8f640 [label="b"];
-    n0x4a8f640 [label="(14)
-MATCH
-'g'"];
-    n0x4a8f800 -> n0x4a8f8e0 [label="b"];
-    n0x4a8f8e0 [label="(20)
-CONCAT
-"];
-    n0x4a8f8e0 -> n0x4a8f790 [label="a"];
-    n0x4a8f790 [label="(17)
-MATCHGRP
-1"];
-    n0x4a8f8e0 -> n0x4a8fa10 [label="b"];
-    n0x4a8fa10 [label="(22)
-CONCAT
-"];
-    n0x4a8fa10 -> n0x4a8f870 [label="a"];
-    n0x4a8f870 [label="(19)
-MATCHSET
-26 chars"];
-    n0x4a8fa10 -> n0x4a8f9a0 [label="b"];
-    n0x4a8f9a0 [label="(21)
-END
+    n0xb45701561470 -> n0xb45701561440 [label="b"];
+    n0xb45701561440 [label="(9)
+DONE
 "];
 }

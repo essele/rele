@@ -154,6 +154,41 @@ fail:
     return NULL;
 }
 
+
+// -------------------------------------------------------------------------------
+// TASKS
+// -------------------------------------------------------------------------------
+struct task {
+    struct task *next;          // tasks are singly linked
+    struct node *n;             // current node
+    struct node *last;          // last one we processed (for direction)
+};
+
+static int tcount = 0;
+static int tmax = 0;
+
+struct task *task_alloc() {
+    struct task *task = (struct task *)malloc(sizeof(struct task));
+    if (!task) return NULL;
+    memset((void *)task, 0, sizeof(struct task));
+
+    tcount++;
+    if (tcount > tmax) {
+        tmax = tcount;
+        fprintf(stderr, "max task count is %d\n", tmax);
+    }
+    return task;
+}
+void task_free(struct task *task) {
+    free(task);
+    tcount--;
+}
+
+
+// -------------------------------------------------------------------------------
+// SETS (of characters or ranges etc)
+// -------------------------------------------------------------------------------
+
 // Given a set of characters [abc\d1-0] etc, create a 128 bit mask that we
 // can use to do rapid comparisons. The set will be linked into node b
 // of the supplied node, and the new pointer returned.
@@ -232,6 +267,15 @@ fail:
 
 static void set_free(struct set *set) {
     free(set);
+}
+
+int match_set(char ch, struct set *set) {
+    int word = ch/32;
+
+    if (set->d[ch/32] & ~((uint32_t)(1 << (ch % 32)))) {
+        return 1;
+    }
+    return 0;
 }
 
 
@@ -348,6 +392,9 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
         }
         p++;
     }
+    // Now some postprocessing, currently just adding an OP_DONE so we can easily
+    // recognise the end of the tree.
+    create_node_here(ctx, last, OP_DONE, NULL, NULL);
     return ctx;
 
 fail:
@@ -358,25 +405,23 @@ fail:
 // Walk the tree and free all of the things that might have been allocated...
 void tree_free(struct rectx *ctx) {
     struct node *n = ctx->root;
-    struct node *last;
+    struct node *last = NULL;
 
     while (n) {
         switch(n->op) {
-
-
             case OP_CONCAT:
             case OP_ALTERNATE:
-                if (last == n->a) goto down_b;
-                if (last == n->b) goto free_and_up;
-                goto down_a;
+                if (last == n->a) goto leg_b;
+                if (last == n->b) goto parent;
+                goto leg_a;
             
             case OP_MULT:
             case OP_GROUP:
             case OP_PLUS:
             case OP_QUESTION:
             case OP_STAR:
-                if (last == n->b) goto free_and_up;
-                goto down_b;
+                if (last == n->b) goto parent;
+                goto leg_b;
 
             case OP_MATCHSET:
                 set_free(n->set);       // fall through
@@ -385,25 +430,27 @@ void tree_free(struct rectx *ctx) {
             case OP_MATCHGRP:
             case OP_BEGIN:
             case OP_END:
-                goto free_and_up;
+            case OP_DONE:
+                goto parent;
 
 
             default:
+#ifdef DEBUG_ID
                 fprintf(stderr, "ERROR: unknown node during tree_free (op=%d id=%d)\n", n->op, n->id);
+#else
+                fprintf(stderr, "ERROR: unknown node during tree_free (op=%d)\n", n->op);
+#endif
                 break;
 
-down_a:
-                last = n;
+leg_a:         last = n;
                 n = n->a;
                 break;
 
-down_b: 
-                last = n;
+leg_b:         last = n;
                 n = n->b;
                 break;
 
-free_and_up:    
-                last = n;
+parent:         last = n;
                 n = n->parent;
                 node_free(last);
                 break;
@@ -412,26 +459,222 @@ free_and_up:
 
 }
 
+// -------------------------------------------------------------------------------
+// Simple matching with escapes and classes
+// -------------------------------------------------------------------------------
+int matchone(char *p, char ch) {
+    if (*p == '.') return 1;            // always match
+    if (*p == '\\') {
+        switch(p[1]) {
+            // Types...
+            case 'd':       return isdigit(ch);
+            case 'D':       return !isdigit(ch);
+            case 'w':       return isalnum(ch);
+            case 'W':       return !isalnum(ch);
+            case 's':       return isspace(ch);
+            case 'S':       return !isspace(ch);
+
+            // Normal escapes...
+            case 't':       return ch == '\t';
+            case 'n':       return ch == '\n';
+
+            // Regex escapes...
+            case '\\':
+            case '*': case '+': case '?': case '.':
+            case '$': case '^': case '(': case ')':
+            case '[': case ']': case '{': case '}':
+            case '-': case '|':
+                            return p[1] == ch;
+        }
+        // TODO: needs to fail in compile rather than here
+        return -1;
+    }
+    // TODO: needs case indepedence here
+    return *p == ch;
+}
+
+// -------------------------------------------------------------------------------
+// TASK EXECUTION
+// -------------------------------------------------------------------------------
+
+// Create a new task, optionally copying any state from the 'from' task
+struct task *task_new(struct task *from, struct task *next, struct node *last, struct node *node) {
+    struct task *task = task_alloc();
+    if (!task) return NULL;
+
+    if (from) {
+        // TODO: copy from
+    }
+    task->next = next;
+    task->last = last;
+    task->n = node;
+    return task;
+}
+
+
+int re_match(struct rectx *ctx, char *p, int len) {
+    // Create the first task on the list...
+    struct task *run_list = task_new(NULL, NULL, NULL, ctx->root);
+
+    // Keep track of the previous one so we can remove items
+    struct task *prev = NULL;
+
+    struct task *t;
+    struct set *set;
+    char *start = p;
+    char *end = p + (len ? len : strlen(p));
+    int rc = 0;
+
+    do {
+        char ch = (p < end ? *p : 0);
+
+        // Get ready to run through for this char...
+        t = run_list;
+        prev = NULL;
+
+        // Now for each task go through the binary tree until we get to
+        // a match type op, then we either die (match failed), or we stay
+        // for next time.
+        while (t) {
+            struct node *n = t->n;
+
+            switch(n->op) {
+                // If we get to OP_DONE then we are done, we need to 
+                // be at a zero to be successful
+                case OP_DONE:
+                    if (ch != 0) goto die;
+                    goto done;
+
+                case OP_CONCAT:
+                    if (t->last == n->a) goto leg_b;
+                    if (t->last == n->b) goto parent;
+                    goto leg_a;
+
+                // If we get here from above then spin off a new task to go down leg b
+                // and we go down leg a. Anything coming back up, goes to the parent.
+                case OP_ALTERNATE:
+                    if (t->last == n->parent) {
+                        t->next = task_new(t, t->next, n, n->b);
+                        goto leg_a;
+                    }
+                    goto parent;
+
+                // If we get here from above, then go down the b leg. If we get here
+                // from b, then it was successful and we spawn. Who goes where depends
+                // on if we are lazy or not...
+                case OP_PLUS:
+                    if (t->last == n->parent) goto leg_b;
+                    goto new_b_or_parent;
+
+                // If we get here from above, we spawn to go back (zero) then we go
+                // down b. If we get here from b, then carry on back up.
+                case OP_QUESTION:
+                    if (t->last == n->b) goto parent;
+                    goto new_b_or_parent;
+
+                // If we hit from above then spawn to go right back up (zero) and from
+                // b we do the same.
+                case OP_STAR:
+                    goto new_b_or_parent;
+
+                case OP_BEGIN:
+                    if (p == start) goto parent;
+                    goto die;
+
+                case OP_END:
+                    if (*p == 0) goto parent;
+                    goto die;
+
+                // If we match we just go back up but let the next task run. If we
+                // fail then we die.
+                case OP_MATCH:
+                    fprintf(stderr, "pos=%d task=%p nid=%d\n", (int)(p-start), t, n->id);
+                    if (ch && matchone(n->ch, ch)) {
+                        t->last = n;
+                        t->n = n->parent;
+                        goto next;
+                    }
+                    goto die;
+
+                case OP_MATCHSET:
+                    set = (struct set *)n->set;
+                    if (match_set(ch, set)) {
+                        t->last = n;
+                        t->n = n->parent;
+                        goto next;
+                    }
+                    goto die;
+                
+                default:
+                    fprintf(stderr, "unknown node op=%d (id=%d)\n", n->op, n->id);
+                    goto die;
+
+// Reused outcomes for the different operations...
+
+new_b_or_parent:    t->next = task_new(t, t->next, n, (n->lazy ? n->b : n->parent));
+                    t->n = (n->lazy ? n->parent : n->b);
+                    t->last = n;
+                    continue;
+
+leg_a:              t->n = n->a;
+                    t->last = n;
+                    continue;
+
+leg_b:              t->n = n->b;
+                    t->last = n;
+                    continue;
+
+parent:             t->n = n->parent;
+                    t->last = n;
+                    continue;
+
+next:               prev = t;
+                    t = t->next;
+                    continue;
+
+die:                if (prev) {
+                        prev->next = t->next; task_free(t); t = prev->next;
+                    } else {
+                        run_list = t->next; task_free(t); t = run_list;
+                    }
+                    continue;
+            }
+        }
+        p++;
+    } while(p <= end);
+
+    // Ok, we get here because we've run out of text or we've run out of tasks
+    // or both.
+done:
+    if (t) {
+        // If t is set, then that's the one that finished first
+        fprintf(stderr, "task=%p node=%p nid=%d *p=%d\n", t, t->n, t->n->id, *p);
+    } else {
+        fprintf(stderr, "match failed\n");
+    }
+}
+
+
 
 
 #include <stdio.h>
 
 char *opmap(uint8_t op) {
     switch(op) {
-        case OP_MATCH:  return "MATCH";
-        case OP_BEGIN:  return "BEGIN";
-        case OP_END:    return "END";
-        case OP_CONCAT: return "CONCAT";
-        case OP_PLUS:   return "PLUS";
-        case OP_NOP:    return "NOP";
+        case OP_MATCH:      return "MATCH";
+        case OP_BEGIN:      return "BEGIN";
+        case OP_END:        return "END";
+        case OP_CONCAT:     return "CONCAT";
+        case OP_PLUS:       return "PLUS";
+        case OP_NOP:        return "NOP";
         case OP_QUESTION:   return "QUESTION";
         case OP_ALTERNATE:  return "ALTERNATE";
-        case OP_DONE:   return "DONE";
-        case OP_GROUP:  return "GROUP";
+        case OP_DONE:       return "DONE";
+        case OP_GROUP:      return "GROUP";
         case OP_MATCHSET:   return "MATCHSET";
-        case OP_MULT:   return "MULT";
-        case OP_MATCHGRP: return "MATCHGRP";
-        default:        return "UNKNOWN";
+        case OP_MULT:       return "MULT";
+        case OP_MATCHGRP:   return "MATCHGRP";
+        default:            return "UNKNOWN";
     }
 }
 
@@ -523,8 +766,13 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abc?def+ghi", 0);
 //    struct rectx *ctx = re_compile("abc(def|ghi)jkl[a-z]", 0);
 //    struct rectx *ctx = re_compile("[a-z]", F_CASELESS);
-    struct rectx *ctx = re_compile("ab(?:cd|ef){2,4}g+?\\1[a-z]$", 0);
+//    struct rectx *ctx = re_compile("ab(?:cd|ef){2,4}g+?\\1[a-z]$", 0);
+
+//    struct rectx *ctx = re_compile("ab[\\d]+c+", 0);
+    struct rectx *ctx = re_compile("ab.*c", 0);
     export_tree(ctx->root, "tree.dot");
+
+    int x = re_match(ctx, "abccccccccccccccccc", 0);
 
 
     tree_free(ctx);
