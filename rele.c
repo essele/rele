@@ -27,6 +27,7 @@ struct node {
     struct node         *a;             // the first child
     union {
         struct node     *b;         // the second child
+        struct set      *set;       // a possible set match
         char            ch[2];      // can store matched char
     };
     struct node         *parent;        // for a way back
@@ -114,6 +115,73 @@ fail:
     return NULL;
 }
 
+// Given a set of characters [abc\d1-0] etc, create a 128 bit mask that we
+// can use to do rapid comparisons. The set will be linked into node b
+// of the supplied node, and the new pointer returned.
+struct set {
+    uint32_t d[4];
+};
+
+static char *build_set(char *p, struct node *n) {
+    // Allocate the space...
+    struct set *set = malloc(sizeof(struct set));
+    if (!set) return NULL;
+    memset((void *)set, 0, sizeof(struct set));
+
+    int negate = 0;
+
+    #define SET_VAL(v)      set->d[(v)/32] |= (1 << ((v)%32))
+    #define SET_RANGE(beg, end)     for (uint8_t c = beg; c <= end; c++) set->d[c/32] |= (1 << (c%32))
+
+    p++;            // get past the '['
+    if (*p == '^') { negate = 1; p++; }
+    while (1) {
+        if (*p == ']') break;           // done
+        if (p[1] == '-' && p[2] && p[2] != ']') {
+            if (p[0] > p[2]) goto fail;
+            // todo: case
+            for (int i=p[0]; i <= p[2]; i++) {
+                int word = i / 32;
+                int bit = i % 32;
+                set->d[word] |= (1 << bit);
+            }
+            p += 3;           
+        } else {
+            if (*p == '\\') {
+                switch (*(++p)) {
+                    case 'w':   SET_RANGE('a', 'z');
+                                SET_RANGE('A', 'Z');    // fall through
+                    case 'd':   SET_RANGE('0', '9'); break;
+                    case 's':   SET_VAL(' '); SET_VAL('\f'); SET_VAL('\n'); 
+                                SET_VAL('\r'); SET_VAL('\t'); SET_VAL('\v'); break;
+                    case 'W':   SET_RANGE(0, '0'-1); SET_RANGE('9'+1, 'A'-1);
+                                SET_RANGE('Z'+1, 'a'-1); SET_RANGE('z'+1, 126); break;
+                    case 'D':   SET_RANGE(0, '0'-1); SET_RANGE('9'+1, 126); break;
+                    case 'S':   SET_RANGE(0, 8); SET_RANGE(14, 31); SET_RANGE(33, 126); break;
+                    case 0:     goto fail;
+                    default:    SET_VAL(*p); break;
+                }
+            } else {
+                // TODO: case!
+                SET_VAL(*p);
+            }
+            p++;
+        }
+    }
+    if (negate) {
+        set->d[0] = ~set->d[0];
+        set->d[1] = ~set->d[1];
+        set->d[2] = ~set->d[2];
+        set->d[3] = ~set->d[3];
+    }
+    n->set = set;
+    return p;
+
+fail:
+    free(set);
+    return NULL;
+}
+
 
 // ------------------------------------------------------------------------
 // Simple compiler that turns a regular expression into a binary tree
@@ -158,6 +226,13 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 last = create_node_here(ctx, last, (uint8_t)*p, NULL, NOTUSED);
                 break;
 
+            case OP_MATCHSET:
+                last = create_node_here(ctx, last, OP_MATCHSET, NULL, NULL);
+                if (!last) goto fail;
+                p = build_set(p, last);
+                fprintf(stderr, "HERE p is %d (%c)\n", *p, *p);
+                if (!p) goto fail;
+                break;
 
             default:
                 if (*p == '\\' && p[1] >= '1' && p[1] <= '9') {
@@ -218,6 +293,13 @@ void dump_dot(struct node *n, FILE *f) {
         fprintf(f, "'\"];\n");
 //        fprintf(f, "    n%p [label=\"%d %c%c\"];\n", (void*)n, n->op, n->ch[0], n->ch[1]);
         return;
+    } else if (n->op == OP_MATCHSET) {
+        int chars = __builtin_popcount(n->set->d[0]);
+        chars += __builtin_popcount(n->set->d[1]);
+        chars += __builtin_popcount(n->set->d[2]);
+        chars += __builtin_popcount(n->set->d[3]);
+        fprintf(f, "    n%p [label=\"%s %d chars\"];\n", (void *)n, opmap(n->op), chars);
+        return;
     } else {
         fprintf(f, "    n%p [label=\"%s\"];\n", (void *)n, opmap(n->op));
     }
@@ -242,8 +324,13 @@ void export_tree(struct node *root, const char *filename) {
 
 int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abc?def+ghi", 0);
-    struct rectx *ctx = re_compile("abc(def|ghi)jkl", 0);
+    struct rectx *ctx = re_compile("abc(def|ghi)jkl[^a-z]", 0);
     export_tree(ctx->root, "tree.dot");
+
+//    struct set *s = build_set("[a-zA-Z0-9]");
+//    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
+
+
 }
 
 
