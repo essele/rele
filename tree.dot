@@ -1,43 +1,67 @@
 digraph tree {
-    n0xbcdd325ae320 [label="CONCAT"];
-    n0xbcdd325ae320 -> n0xbcdd325ae2c0 [label="a"];
-    n0xbcdd325ae2c0 [label="MATCH 'a'"];
-    n0xbcdd325ae320 -> n0xbcdd325ae380 [label="b"];
-    n0xbcdd325ae380 [label="CONCAT"];
-    n0xbcdd325ae380 -> n0xbcdd325ae2f0 [label="a"];
-    n0xbcdd325ae2f0 [label="MATCH 'b'"];
-    n0xbcdd325ae380 -> n0xbcdd325ae530 [label="b"];
-    n0xbcdd325ae530 [label="CONCAT"];
-    n0xbcdd325ae530 -> n0xbcdd325ae350 [label="a"];
-    n0xbcdd325ae350 [label="GROUP"];
-    n0xbcdd325ae350 -> n0xbcdd325ae440 [label="b"];
-    n0xbcdd325ae440 [label="ALTERNATE"];
-    n0xbcdd325ae440 -> n0xbcdd325ae410 [label="a"];
-    n0xbcdd325ae410 [label="CONCAT"];
-    n0xbcdd325ae410 -> n0xbcdd325ae3b0 [label="a"];
-    n0xbcdd325ae3b0 [label="MATCH 'c'"];
-    n0xbcdd325ae410 -> n0xbcdd325ae3e0 [label="b"];
-    n0xbcdd325ae3e0 [label="MATCH 'd'"];
-    n0xbcdd325ae440 -> n0xbcdd325ae4d0 [label="b"];
-    n0xbcdd325ae4d0 [label="CONCAT"];
-    n0xbcdd325ae4d0 -> n0xbcdd325ae470 [label="a"];
-    n0xbcdd325ae470 [label="MATCH 'e'"];
-    n0xbcdd325ae4d0 -> n0xbcdd325ae4a0 [label="b"];
-    n0xbcdd325ae4a0 [label="MATCH 'f'"];
-    n0xbcdd325ae530 -> n0xbcdd325ae5c0 [label="b"];
-    n0xbcdd325ae5c0 [label="CONCAT"];
-    n0xbcdd325ae5c0 -> n0xbcdd325ae560 [label="a"];
-    n0xbcdd325ae560 [label="PLUS"];
-    n0xbcdd325ae560 -> n0xbcdd325ae500 [label="b"];
-    n0xbcdd325ae500 [label="MATCH 'g'"];
-    n0xbcdd325ae5c0 -> n0xbcdd325ae620 [label="b"];
-    n0xbcdd325ae620 [label="CONCAT"];
-    n0xbcdd325ae620 -> n0xbcdd325ae590 [label="a"];
-    n0xbcdd325ae590 [label="MATCHGRP 1"];
-    n0xbcdd325ae620 -> n0xbcdd325ae6a0 [label="b"];
-    n0xbcdd325ae6a0 [label="CONCAT"];
-    n0xbcdd325ae6a0 -> n0xbcdd325ae5f0 [label="a"];
-    n0xbcdd325ae5f0 [label="MATCHSET 26 chars"];
-    n0xbcdd325ae6a0 -> n0xbcdd325ae670 [label="b"];
-    n0xbcdd325ae670 [label="END"];
+    n0xbf5bb7e4f320 [label="CONCAT
+"];
+    n0xbf5bb7e4f320 -> n0xbf5bb7e4f2c0 [label="a"];
+    n0xbf5bb7e4f2c0 [label="MATCH
+'a'"];
+    n0xbf5bb7e4f320 -> n0xbf5bb7e4f380 [label="b"];
+    n0xbf5bb7e4f380 [label="CONCAT
+"];
+    n0xbf5bb7e4f380 -> n0xbf5bb7e4f2f0 [label="a"];
+    n0xbf5bb7e4f2f0 [label="MATCH
+'b'"];
+    n0xbf5bb7e4f380 -> n0xbf5bb7e4f560 [label="b"];
+    n0xbf5bb7e4f560 [label="CONCAT
+"];
+    n0xbf5bb7e4f560 -> n0xbf5bb7e4f500 [label="a"];
+    n0xbf5bb7e4f500 [label="MULT
+min=2 max=4"];
+    n0xbf5bb7e4f500 -> n0xbf5bb7e4f350 [label="b"];
+    n0xbf5bb7e4f350 [label="GROUP
+nocapture"];
+    n0xbf5bb7e4f350 -> n0xbf5bb7e4f440 [label="b"];
+    n0xbf5bb7e4f440 [label="ALTERNATE
+"];
+    n0xbf5bb7e4f440 -> n0xbf5bb7e4f410 [label="a"];
+    n0xbf5bb7e4f410 [label="CONCAT
+"];
+    n0xbf5bb7e4f410 -> n0xbf5bb7e4f3b0 [label="a"];
+    n0xbf5bb7e4f3b0 [label="MATCH
+'c'"];
+    n0xbf5bb7e4f410 -> n0xbf5bb7e4f3e0 [label="b"];
+    n0xbf5bb7e4f3e0 [label="MATCH
+'d'"];
+    n0xbf5bb7e4f440 -> n0xbf5bb7e4f4d0 [label="b"];
+    n0xbf5bb7e4f4d0 [label="CONCAT
+"];
+    n0xbf5bb7e4f4d0 -> n0xbf5bb7e4f470 [label="a"];
+    n0xbf5bb7e4f470 [label="MATCH
+'e'"];
+    n0xbf5bb7e4f4d0 -> n0xbf5bb7e4f4a0 [label="b"];
+    n0xbf5bb7e4f4a0 [label="MATCH
+'f'"];
+    n0xbf5bb7e4f560 -> n0xbf5bb7e4f5f0 [label="b"];
+    n0xbf5bb7e4f5f0 [label="CONCAT
+"];
+    n0xbf5bb7e4f5f0 -> n0xbf5bb7e4f590 [label="a"];
+    n0xbf5bb7e4f590 [label="PLUS
+lazy"];
+    n0xbf5bb7e4f590 -> n0xbf5bb7e4f530 [label="b"];
+    n0xbf5bb7e4f530 [label="MATCH
+'g'"];
+    n0xbf5bb7e4f5f0 -> n0xbf5bb7e4f650 [label="b"];
+    n0xbf5bb7e4f650 [label="CONCAT
+"];
+    n0xbf5bb7e4f650 -> n0xbf5bb7e4f5c0 [label="a"];
+    n0xbf5bb7e4f5c0 [label="MATCHGRP
+1"];
+    n0xbf5bb7e4f650 -> n0xbf5bb7e4f6d0 [label="b"];
+    n0xbf5bb7e4f6d0 [label="CONCAT
+"];
+    n0xbf5bb7e4f6d0 -> n0xbf5bb7e4f620 [label="a"];
+    n0xbf5bb7e4f620 [label="MATCHSET
+26 chars"];
+    n0xbf5bb7e4f6d0 -> n0xbf5bb7e4f6a0 [label="b"];
+    n0xbf5bb7e4f6a0 [label="END
+"];
 }

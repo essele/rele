@@ -9,6 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>      // remove, for debug only
+#include <ctype.h>
+
+// Include an ID in the nodes to help with debugging and tree visualisation
+#undef DEBUG_ID    
 
 
 // TODO: this will need to be in an include file....
@@ -29,17 +33,35 @@ enum {
 // Binary tree bits...
 // ============================================================================
 
+#define NO_MAX              0xffff
+#define NO_GROUP            0xff
+
 struct node {
-    struct node         *a;             // the first child
+#ifdef DEBUG_ID
+    uint32_t            id;         // for debug purposes only
+#endif
+
+    union {
+       struct node      *a;         // the first child
+       struct {
+            uint16_t    min;
+            uint16_t    max;
+        };
+       uint8_t          group;      // for creating groups
+       uint8_t          lazy;       // for PLUS, STAR, and QUESTION
+    };
     union {
         struct node     *b;         // the second child
         struct set      *set;       // a possible set match
-        uint8_t         grp;        // a possible group match
+        uint8_t         mgrp;       // a possible group match
         char            ch[2];      // can store matched char
     };
     struct node         *parent;        // for a way back
     uint8_t             op;             // which operation?
+    // Three bytes unused here...
 };
+
+
 
 // Where we have nodes that don't need children we need to mark the
 // b-leg otherwise it will be used by something...
@@ -57,9 +79,14 @@ struct rectx {
 // and destruction of nodes, but for now we will just use malloc.
 
 struct node *node_alloc() {
+    static uint32_t node_id = 1;
+
     struct node *n = (struct node *)malloc(sizeof(struct node));
     if (!n) return NULL;
     memset((void *)n, 0, sizeof(struct node));
+#ifdef DEBUG_ID
+    n->id = node_id++;
+#endif
     return n;
 }
 void node_free(struct node *n) {
@@ -108,6 +135,8 @@ static struct node *create_node_here(struct rectx *ctx, struct node *last, uint8
         n->parent = NULL;
         ctx->root = n;
     } else if (!last->b) {
+        // TODO: if b happens to be zero on the wrong type of node this could go wrong, need to protect
+        // against it, probably by checking op type (only concat and alternate can use b as a node?)
         last->b = n;
         n->parent = last;
     } else {
@@ -199,6 +228,34 @@ fail:
 }
 
 
+// Process a min/max spec and update the supplied node accordingly
+char *minmax(char *p, struct node *n) {
+    uint16_t min = 0, max = 0;
+    p++;                // get past '{'
+
+    // First check we have the required digit...
+    if (!isdigit((int)*p)) return NULL;
+
+    // Now work out the first number...
+    while (isdigit((int)*p)) min = (min * 10) + (*p++ - '0');
+
+    if (*p == '}') { max = min; goto done; }        // An exact number
+    if (*p++ != ',') return NULL;                   // Need a comma
+    if (*p == '}') { max = NO_MAX; goto done; }     // No second number
+
+    // Now get the second number...
+    while (isdigit((int)*p)) max = (max * 10) + (*p++ - '0');
+
+    // Now must be a close bracket and right order...
+    if (*p != '}' || max < min) return NULL;
+
+done:
+    n->min = min;
+    n->max = max;
+    return p;
+}
+
+
 // ------------------------------------------------------------------------
 // Simple compiler that turns a regular expression into a binary tree
 // ------------------------------------------------------------------------
@@ -213,14 +270,18 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
     // Now run through the regex...
     char        *p = regex;
     struct node *last = NULL;
+    uint8_t     group = 1;
+    int         lazy;
 
     while (*p) {
-        fprintf(stderr, "looking at [%c]\n", *p);
         switch (*p) {
             case OP_PLUS:
             case OP_STAR:
             case OP_QUESTION:
+                lazy = (p[1] == '?' ? 1 : 0);
                 last = create_node_above(ctx, last, (uint8_t)*p, NULL, last);
+                last->lazy = lazy;
+                p += lazy;              // skip the ? if we have it
                 break;
 
             case OP_ALTERNATE:
@@ -231,6 +292,17 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
 
             case OP_GROUP:
                 last = create_node_here(ctx, last, OP_GROUP, NULL, NULL);
+                if (p[1] == '?' && p[2] && p[2] == ':') {
+                    last->group = NO_GROUP;
+                    p += 2;
+                } else {
+                    last->group = group++;
+                }
+                break;
+
+            case OP_MULT:
+                last = create_node_above(ctx, last, OP_MULT, NULL, last);
+                p = minmax(p, last);
                 break;
 
             case ')':       // ending a group
@@ -246,7 +318,6 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 last = create_node_here(ctx, last, OP_MATCHSET, NULL, NULL);
                 if (!last) goto fail;
                 p = build_set(ctx, p, last);
-                fprintf(stderr, "HERE p is %d (%c)\n", *p, *p);
                 if (!p) goto fail;
                 break;
 
@@ -255,7 +326,7 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                     // This is a \1 type match on a group
                     last = create_node_here(ctx, last, OP_MATCHGRP, NULL, NULL);
                     if (!last) goto fail;
-                    last->grp = (uint8_t)p[1] - '0';
+                    last->mgrp = (uint8_t)p[1] - '0';
                     p++;                 
                 } else {
                     // Normal char, escaped, or class match...
@@ -303,34 +374,73 @@ char *opmap(uint8_t op) {
 void dump_dot(struct node *n, FILE *f) {
     if (!n) return;
 
+    int chars;
 
+    #define GEND fprintf(f, "\"];\n")
 
-    if (n->op == OP_MATCH) {
-        fprintf(f, "    n%p [label=\"%s '%c", (void *)n, opmap(n->op), n->ch[0]);
-        if (n->ch[0] == '\\') {
-            fprintf(f, "%c", n->ch[1]);
-        }
-        fprintf(f, "'\"];\n");
-//        fprintf(f, "    n%p [label=\"%d %c%c\"];\n", (void*)n, n->op, n->ch[0], n->ch[1]);
-        return;
-    } else if (n->op == OP_MATCHSET) {
-        int chars = __builtin_popcount(n->set->d[0]);
-        chars += __builtin_popcount(n->set->d[1]);
-        chars += __builtin_popcount(n->set->d[2]);
-        chars += __builtin_popcount(n->set->d[3]);
-        fprintf(f, "    n%p [label=\"%s %d chars\"];\n", (void *)n, opmap(n->op), chars);
-        return;
-    } else if (n->op == OP_MATCHGRP) {
-        fprintf(f, "    n%p [label=\"%s %d\"];\n", (void *)n, opmap(n->op), n->grp);
-        return;
-    } else {
-        fprintf(f, "    n%p [label=\"%s\"];\n", (void *)n, opmap(n->op));
+#ifdef DEBUG_ID
+    fprintf(f, "    n%p [label=\"(%d)\n%s\n", (void *)n, n->id, opmap(n->op));
+#else
+    fprintf(f, "    n%p [label=\"%s\n", (void *)n, opmap(n->op));
+#endif
+
+    switch(n->op) {
+        case OP_MATCH:
+            if (n->ch[0] == '\\') {
+                fprintf(f, "'\\%c'", n->ch[1]);
+            } else {
+                fprintf(f, "'%c'", n->ch[0]);
+            }
+            GEND;
+            return;
+
+        case OP_MATCHSET:
+            chars = __builtin_popcount(n->set->d[0]);
+            chars += __builtin_popcount(n->set->d[1]);
+            chars += __builtin_popcount(n->set->d[2]);
+            chars += __builtin_popcount(n->set->d[3]);
+            fprintf(f, "%d chars", chars);
+            GEND;
+            return;
+
+        case OP_MATCHGRP:
+            fprintf(f, "%d", n->mgrp);
+            GEND;
+            return;
+
+        case OP_GROUP:
+            if (n->group == NO_GROUP) {
+                fprintf(f, "nocapture");
+            } else {
+                fprintf(f, "%d", n->group);
+            }
+            GEND;
+            goto bonly;
+
+        case OP_MULT:
+            fprintf(f, "min=%d max=%d", n->min, n->max);
+            GEND;
+            goto bonly;
+
+        case OP_PLUS:
+        case OP_QUESTION:
+        case OP_STAR:
+            if (n->lazy) {
+                fprintf(f, "lazy");
+            }
+            GEND;
+            break;
+
+        default:
+            GEND;
     }
 
     if (n->a && (n->a != NOTUSED)) {
         fprintf(f, "    n%p -> n%p [label=\"a\"];\n", (void*)n, (void*)n->a);
         dump_dot(n->a, f);
     }
+
+bonly:
     if (n->b && (n->b != NOTUSED)) {
         fprintf(f, "    n%p -> n%p [label=\"b\"];\n", (void*)n, (void*)n->b);
         dump_dot(n->b, f);
@@ -349,7 +459,7 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abc?def+ghi", 0);
 //    struct rectx *ctx = re_compile("abc(def|ghi)jkl[a-z]", 0);
 //    struct rectx *ctx = re_compile("[a-z]", F_CASELESS);
-    struct rectx *ctx = re_compile("ab(cd|ef)g+\\1[a-z]$", 0);
+    struct rectx *ctx = re_compile("ab(?:cd|ef){2,4}g+?\\1[a-z]$", 0);
     export_tree(ctx->root, "tree.dot");
 
 //    struct set *s = build_set("[a-zA-Z0-9]");
