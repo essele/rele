@@ -12,7 +12,7 @@
 #include <ctype.h>
 
 // Include an ID in the nodes to help with debugging and tree visualisation
-#undef DEBUG_ID    
+#define DEBUG_ID    
 
 
 // TODO: this will need to be in an include file....
@@ -90,6 +90,9 @@ struct node *node_alloc() {
     return n;
 }
 void node_free(struct node *n) {
+#ifdef DEBUG_ID
+    fprintf(stderr, "Freeing node %d\n", n->id);
+#endif
     free(n);
 }
 
@@ -227,6 +230,10 @@ fail:
     return NULL;
 }
 
+static void set_free(struct set *set) {
+    free(set);
+}
+
 
 // Process a min/max spec and update the supplied node accordingly
 char *minmax(char *p, struct node *n) {
@@ -348,6 +355,63 @@ fail:
     return NULL;
 }
 
+// Walk the tree and free all of the things that might have been allocated...
+void tree_free(struct rectx *ctx) {
+    struct node *n = ctx->root;
+    struct node *last;
+
+    while (n) {
+        switch(n->op) {
+
+
+            case OP_CONCAT:
+            case OP_ALTERNATE:
+                if (last == n->a) goto down_b;
+                if (last == n->b) goto free_and_up;
+                goto down_a;
+            
+            case OP_MULT:
+            case OP_GROUP:
+            case OP_PLUS:
+            case OP_QUESTION:
+            case OP_STAR:
+                if (last == n->b) goto free_and_up;
+                goto down_b;
+
+            case OP_MATCHSET:
+                set_free(n->set);       // fall through
+
+            case OP_MATCH:
+            case OP_MATCHGRP:
+            case OP_BEGIN:
+            case OP_END:
+                goto free_and_up;
+
+
+            default:
+                fprintf(stderr, "ERROR: unknown node during tree_free (op=%d id=%d)\n", n->op, n->id);
+                break;
+
+down_a:
+                last = n;
+                n = n->a;
+                break;
+
+down_b: 
+                last = n;
+                n = n->b;
+                break;
+
+free_and_up:    
+                last = n;
+                n = n->parent;
+                node_free(last);
+                break;
+        }
+    }
+
+}
+
 
 
 #include <stdio.h>
@@ -462,6 +526,9 @@ int main(int argc, char *argv[]) {
     struct rectx *ctx = re_compile("ab(?:cd|ef){2,4}g+?\\1[a-z]$", 0);
     export_tree(ctx->root, "tree.dot");
 
+
+    tree_free(ctx);
+    free(ctx);
 //    struct set *s = build_set("[a-zA-Z0-9]");
 //    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
 
