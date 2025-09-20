@@ -18,7 +18,7 @@
 
 
 enum {
-    OP_NOP = 0, OP_CONCAT, OP_MATCH, OP_GMATCH, OP_DONE,
+    OP_NOP = 0, OP_CONCAT, OP_MATCH, OP_MATCHGRP, OP_DONE,
     OP_ALTERNATE = '|',
     OP_PLUS = '+', OP_STAR = '*', OP_QUESTION = '?', OP_GROUP = '(',
     OP_BEGIN = '^', OP_END = '$', OP_MULT = '{',
@@ -34,6 +34,7 @@ struct node {
     union {
         struct node     *b;         // the second child
         struct set      *set;       // a possible set match
+        uint8_t         grp;        // a possible group match
         char            ch[2];      // can store matched char
     };
     struct node         *parent;        // for a way back
@@ -251,7 +252,11 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
 
             default:
                 if (*p == '\\' && p[1] >= '1' && p[1] <= '9') {
-                    // This is a \1 type match on a group                 
+                    // This is a \1 type match on a group
+                    last = create_node_here(ctx, last, OP_MATCHGRP, NULL, NULL);
+                    if (!last) goto fail;
+                    last->grp = (uint8_t)p[1] - '0';
+                    p++;                 
                 } else {
                     // Normal char, escaped, or class match...
                     last = create_node_here(ctx, last, OP_MATCH, NULL, (struct node *)p);
@@ -290,7 +295,7 @@ char *opmap(uint8_t op) {
         case OP_GROUP:  return "GROUP";
         case OP_MATCHSET:   return "MATCHSET";
         case OP_MULT:   return "MULT";
-        case OP_GMATCH: return "GMATCH";
+        case OP_MATCHGRP: return "MATCHGRP";
         default:        return "UNKNOWN";
     }
 }
@@ -314,6 +319,9 @@ void dump_dot(struct node *n, FILE *f) {
         chars += __builtin_popcount(n->set->d[2]);
         chars += __builtin_popcount(n->set->d[3]);
         fprintf(f, "    n%p [label=\"%s %d chars\"];\n", (void *)n, opmap(n->op), chars);
+        return;
+    } else if (n->op == OP_MATCHGRP) {
+        fprintf(f, "    n%p [label=\"%s %d\"];\n", (void *)n, opmap(n->op), n->grp);
         return;
     } else {
         fprintf(f, "    n%p [label=\"%s\"];\n", (void *)n, opmap(n->op));
@@ -339,8 +347,9 @@ void export_tree(struct node *root, const char *filename) {
 
 int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abc?def+ghi", 0);
-    struct rectx *ctx = re_compile("abc(def|ghi)jkl[^a-z]", 0);
+//    struct rectx *ctx = re_compile("abc(def|ghi)jkl[a-z]", 0);
 //    struct rectx *ctx = re_compile("[a-z]", F_CASELESS);
+    struct rectx *ctx = re_compile("ab(cd|ef)g+\\1[a-z]$", 0);
     export_tree(ctx->root, "tree.dot");
 
 //    struct set *s = build_set("[a-zA-Z0-9]");
