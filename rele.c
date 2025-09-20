@@ -145,6 +145,14 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 last = create_node_above(ctx, last, OP_ALTERNATE, last, NULL);
                 break;
 
+            case OP_GROUP:
+                last = create_node_here(ctx, last, OP_GROUP, NULL, NULL);
+                break;
+
+            case ')':       // ending a group
+                while (last && last->op != OP_GROUP) { last = last->parent; }
+                break;
+
             case OP_BEGIN:
             case OP_END:
                 last = create_node_here(ctx, last, (uint8_t)*p, NULL, NOTUSED);
@@ -233,7 +241,8 @@ void export_tree(struct node *root, const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-    struct rectx *ctx = re_compile("abc?def+ghi", 0);
+//    struct rectx *ctx = re_compile("abc?def+ghi", 0);
+    struct rectx *ctx = re_compile("abc(def|ghi)jkl", 0);
     export_tree(ctx->root, "tree.dot");
 }
 
