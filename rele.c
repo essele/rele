@@ -37,10 +37,6 @@ enum {
 #define NO_GROUP            0xff
 
 struct node {
-#ifdef DEBUG_ID
-    uint32_t            id;         // for debug purposes only
-#endif
-
     union {
        struct node      *a;         // the first child
        struct {
@@ -59,6 +55,7 @@ struct node {
     struct node         *parent;        // for a way back
     uint8_t             op;             // which operation?
     // Three bytes unused here...
+    // TODO: lazy needs to exist with min/max
 };
 
 
@@ -71,35 +68,20 @@ struct node {
 // We have a 'context' which contains the root of the tree
 struct rectx {
     struct node     *root;
-    uint32_t        flags;
+
+    uint32_t        flags;      // TODO: doesn't need to be 32 bits?
+
+    struct node     *nodes;     // current node pointer
+    struct set      *sets;      // current set pointer
+
+    // Memory for nodes and sets will follow this...
 };
 
-
-// We will need to consider more efficient memory management for the creation
-// and destruction of nodes, but for now we will just use malloc.
-
-struct node *node_alloc() {
-    static uint32_t node_id = 1;
-
-    struct node *n = (struct node *)malloc(sizeof(struct node));
-    if (!n) return NULL;
-    memset((void *)n, 0, sizeof(struct node));
-#ifdef DEBUG_ID
-    n->id = node_id++;
-#endif
-    return n;
-}
-void node_free(struct node *n) {
-#ifdef DEBUG_ID
-    fprintf(stderr, "Freeing node %d\n", n->id);
-#endif
-    free(n);
-}
+#define NODE_ID(ctx, n)          (int)(((void *)n - ((void *)ctx + sizeof(ctx)))/sizeof(struct node))
 
 static struct node *create_node_above(struct rectx *ctx, struct node *this, uint8_t op, struct node *a, struct node *b) {
     struct node *parent = this->parent;
-    struct node *n = node_alloc();
-    if (!n) return NULL;
+    struct node *n = ctx->nodes++;          // alloc (kind of)
     n->parent = parent;
     this->parent = n;
 
@@ -127,8 +109,7 @@ static struct node *create_node_above(struct rectx *ctx, struct node *this, uint
 // b node of the last one, or if that's taken, we'll need to add a concat.
 //
 static struct node *create_node_here(struct rectx *ctx, struct node *last, uint8_t op, struct node *a, struct node *b) {
-    struct node *n = node_alloc();
-    if (!n) return NULL;
+    struct node *n = ctx->nodes++;  // alloc - kind of
     n->op = op;
     n->a = a;
     n->b = b;
@@ -145,13 +126,8 @@ static struct node *create_node_here(struct rectx *ctx, struct node *last, uint8
     } else {
         // We need a concat...
         n->parent = create_node_above(ctx, last, OP_CONCAT, last, n);
-        if (!n->parent) goto fail;
     }
     return n;
-
-fail:
-    node_free(n);
-    return NULL;
 }
 
 
@@ -172,25 +148,6 @@ struct task {
 };
 
 static int tcount = 0;
-static int tmax = 0;
-
-struct task *task_alloc() {
-    struct task *task = (struct task *)malloc(sizeof(struct task));
-    if (!task) return NULL;
-    memset((void *)task, 0, sizeof(struct task));
-
-    tcount++;
-    if (tcount > tmax) {
-        tmax = tcount;
-        fprintf(stderr, "max task count is %d\n", tmax);
-    }
-    return task;
-}
-void task_free(struct task *task) {
-    free(task);
-    tcount--;
-}
-
 
 // -------------------------------------------------------------------------------
 // SETS (of characters or ranges etc)
@@ -210,11 +167,8 @@ struct set {
 };
 
 static char *build_set(struct rectx *ctx, char *p, struct node *n) {
-    // Allocate the space...
-    struct set *set = malloc(sizeof(struct set));
-    if (!set) return NULL;
-    memset((void *)set, 0, sizeof(struct set));
-
+    // "Allocate" the space...
+    struct set *set = ctx->sets++;
     int negate = 0;
 
     #define SET_VAL(v)                      set->d[(v)/32] |= (1 << ((v)%32))
@@ -337,56 +291,42 @@ done:
 
 // ------------------------------------------------------------------------
 // Dummy (and hopefully fast) version of the compiler that is purely used
-// to measure how many nodes and sets this regex will need.
+// to measure how many nodes and sets this regex will need and then allocate
+// the memory used for both in a single block.
 // ------------------------------------------------------------------------
-struct rectx *calc_scale(char *regex) {
+struct rectx *alloc_ctx(char *regex) {
     int matches = 0;
     int nodes = 0;
     int sets = 0;
 
-    uint8_t last_op = 0;
-
     char *p = regex;
     while (*p) {
-
         // There's always a match at the end of a given brach, therefore matches
         // are the key. We will always have one less "splits" (i.e. concat or 
         // alternate) than we have matches, everything else is always a node.
-
         switch (*p) {
-            case OP_PLUS:
-            case OP_STAR:
-            case OP_QUESTION:
-            case OP_GROUP:
-                nodes++;
-                break;
-
-            case ')':
-                // ignore a close group
-                break;
-
-            case OP_ALTERNATE:
-                // ignore these, we'll treat them like concats later
-                break;
-
             case OP_MULT:
                 p = minmax(p, NULL);
-                last_op = OP_MULT;
+                // drop through...
+
+            // These are always a node...
+            case OP_PLUS: case OP_STAR: case OP_QUESTION: case OP_GROUP:
                 nodes++;
+                break;
+
+            // Ignore these (alternate we'll do later)...
+            case ')': case OP_ALTERNATE:
                 break;
 
             case OP_MATCHSET:
                 p = dummy_set(p);
                 sets++;
-                // fall through
+                // drop through
 
             // These are effectively matches...
-            case OP_BEGIN:
-            case OP_END:
-            default:
+            case OP_BEGIN: case OP_END: default:
                 matches++;
                 break;
-
         }
         p++;
     }
@@ -403,7 +343,21 @@ struct rectx *calc_scale(char *regex) {
     nodes += matches + splits;
 
     fprintf(stderr, "We have %d nodes and %d sets\n", nodes, sets);
-    return NULL;
+
+    struct rectx *ctx = malloc(sizeof(struct rectx) +
+                                (nodes * sizeof(struct node)) + 
+                                (sets * sizeof(struct set)));
+    if (!ctx) return NULL;
+
+    memset(ctx, 0, sizeof(struct rectx) +
+                                (nodes * sizeof(struct node)) + 
+                                (sets * sizeof(struct set)));
+
+    ctx->nodes = (struct node *)((void *)ctx + sizeof(struct rectx));
+    ctx->sets = (struct set *)((void *)ctx + (sizeof(struct rectx) + (nodes * sizeof(struct node))));
+
+    fprintf(stderr, "CTX: %p\nNODES: %p\nSETS: %p\n", ctx, ctx->nodes, ctx->sets);
+    return ctx;
 }
 
 
@@ -412,13 +366,11 @@ struct rectx *calc_scale(char *regex) {
 // ------------------------------------------------------------------------
 
 struct rectx *re_compile(char *regex, uint32_t flags) {
-    // First allocate the ctx structure...
-    struct rectx *ctx = (struct rectx *)malloc(sizeof(struct rectx));
+    // First allocate the ctx structure including nodes and sets based on
+    // the regex
+    struct rectx *ctx = alloc_ctx(regex);
     if (!ctx) return NULL;
-    memset((void *)ctx, 0, sizeof(struct rectx));
     ctx->flags = flags;
-
-    calc_scale(regex);
 
     // Now run through the regex...
     char        *p = regex;
@@ -506,61 +458,10 @@ fail:
     return NULL;
 }
 
-// Walk the tree and free all of the things that might have been allocated...
-void tree_free(struct rectx *ctx) {
-    struct node *n = ctx->root;
-    struct node *last = NULL;
-
-    while (n) {
-        switch(n->op) {
-            case OP_CONCAT:
-            case OP_ALTERNATE:
-                if (last == n->a) goto leg_b;
-                if (last == n->b) goto parent;
-                goto leg_a;
-            
-            case OP_MULT:
-            case OP_GROUP:
-            case OP_PLUS:
-            case OP_QUESTION:
-            case OP_STAR:
-                if (last == n->b) goto parent;
-                goto leg_b;
-
-            case OP_MATCHSET:
-                set_free(n->set);       // fall through
-
-            case OP_MATCH:
-            case OP_MATCHGRP:
-            case OP_BEGIN:
-            case OP_END:
-            case OP_DONE:
-                goto parent;
-
-
-            default:
-#ifdef DEBUG_ID
-                fprintf(stderr, "ERROR: unknown node during tree_free (op=%d id=%d)\n", n->op, n->id);
-#else
-                fprintf(stderr, "ERROR: unknown node during tree_free (op=%d)\n", n->op);
-#endif
-                break;
-
-leg_a:         last = n;
-                n = n->a;
-                break;
-
-leg_b:         last = n;
-                n = n->b;
-                break;
-
-parent:         last = n;
-                n = n->parent;
-                node_free(last);
-                break;
-        }
-    }
-
+// Freeing the context is much simpler now since everything was allocated
+// in a block, so no need to walk the tree anymore.
+void re_free(struct rectx *ctx) {
+    free(ctx);
 }
 
 // -------------------------------------------------------------------------------
@@ -602,9 +503,21 @@ int matchone(char *p, char ch) {
 // -------------------------------------------------------------------------------
 
 // Create a new task, optionally copying any state from the 'from' task
-struct task *task_new(struct task *from, struct task *next, struct node *last, struct node *node) {
-    struct task *task = task_alloc();
-    if (!task) return NULL;
+struct task *task_new(struct task *from, struct task *next, struct node *last, struct node *node, struct task **free_list) {
+    struct task *task;
+
+    if (*free_list) {
+        fprintf(stderr, "reusing task\n");
+        task = *free_list;
+        *free_list = task->next;
+    } else {
+        task = (struct task *)malloc(sizeof(struct task));
+        if (!task) return NULL;
+        memset((void *)task, 0, sizeof(struct task));
+
+        tcount++;
+        fprintf(stderr, "max task count is %d\n", tcount);
+    }
 
     if (from) {
         memcpy(task->stack, from->stack, sizeof(task->stack));
@@ -618,10 +531,16 @@ struct task *task_new(struct task *from, struct task *next, struct node *last, s
     return task;
 }
 
+void task_release(struct task *task, struct task **free_list) {
+    task->next = *free_list;
+    *free_list = task;
+}
+
 
 int re_match(struct rectx *ctx, char *p, int len) {
     // Create the first task on the list...
-    struct task *run_list = task_new(NULL, NULL, NULL, ctx->root);
+    struct task *free_list = NULL;
+    struct task *run_list = task_new(NULL, NULL, NULL, ctx->root, &free_list);
 
     // Keep track of the previous one so we can remove items
     struct task *prev = NULL;
@@ -661,7 +580,7 @@ int re_match(struct rectx *ctx, char *p, int len) {
                 // and we go down leg a. Anything coming back up, goes to the parent.
                 case OP_ALTERNATE:
                     if (t->last == n->parent) {
-                        t->next = task_new(t, t->next, n, n->b);
+                        t->next = task_new(t, t->next, n, n->b, &free_list);
                         goto leg_a;
                     }
                     goto parent;
@@ -715,11 +634,11 @@ int re_match(struct rectx *ctx, char *p, int len) {
 
                     // We must have hit min, so need to spawn...
                     if (n->lazy) {
-                        t->next = task_new(t, t->next, n, n->b);
+                        t->next = task_new(t, t->next, n, n->b, &free_list);
                         t->n = n->parent;
                         t->sp++;        // parent
                     } else {
-                        t->next = task_new(t, t->next, n, n->parent);
+                        t->next = task_new(t, t->next, n, n->parent, &free_list);
                         t->next->sp++;  // parent
                         t->n = n->b;
                     }
@@ -740,7 +659,7 @@ int re_match(struct rectx *ctx, char *p, int len) {
                 // If we match we just go back up but let the next task run. If we
                 // fail then we die.
                 case OP_MATCH:
-                    fprintf(stderr, "pos=%d task=%p nid=%d\n", (int)(p-start), t, n->id);
+                    fprintf(stderr, "pos=%d task=%p nid=%d\n", (int)(p-start), t, NODE_ID(ctx, n));
                     if (ch && matchone(n->ch, ch)) {
                         t->last = n;
                         t->n = n->parent;
@@ -758,12 +677,12 @@ int re_match(struct rectx *ctx, char *p, int len) {
                     goto die;
                 
                 default:
-                    fprintf(stderr, "unknown node op=%d (id=%d)\n", n->op, n->id);
+                    fprintf(stderr, "unknown node op=%d (id=%d)\n", n->op, NODE_ID(ctx, n));
                     goto die;
 
 // Reused outcomes for the different operations...
 
-new_b_or_parent:    t->next = task_new(t, t->next, n, (n->lazy ? n->b : n->parent));
+new_b_or_parent:    t->next = task_new(t, t->next, n, (n->lazy ? n->b : n->parent), &free_list);
                     t->n = (n->lazy ? n->parent : n->b);
                     t->last = n;
                     continue;
@@ -785,9 +704,9 @@ next:               prev = t;
                     continue;
 
 die:                if (prev) {
-                        prev->next = t->next; task_free(t); t = prev->next;
+                        prev->next = t->next; task_release(t, &free_list); t = prev->next;
                     } else {
-                        run_list = t->next; task_free(t); t = run_list;
+                        run_list = t->next; task_release(t, &free_list); t = run_list;
                     }
                     continue;
             }
@@ -800,10 +719,15 @@ die:                if (prev) {
 done:
     if (t) {
         // If t is set, then that's the one that finished first
-        fprintf(stderr, "task=%p node=%p nid=%d *p=%d\n", t, t->n, t->n->id, *p);
+        fprintf(stderr, "task=%p node=%p nid=%d *p=%d\n", t, t->n, NODE_ID(ctx, t->n), *p);
     } else {
         fprintf(stderr, "match failed\n");
     }
+
+    // Ok, now we need to free up all the tasks, they will either be in the run list
+    // or the free list
+    while (free_list) { struct task *x = free_list->next; free(free_list); free_list = x; }
+    while (run_list) { struct task *x = run_list->next; free(run_list); run_list = x; }
 }
 
 
@@ -831,7 +755,7 @@ char *opmap(uint8_t op) {
     }
 }
 
-void dump_dot(struct node *n, FILE *f) {
+void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
     if (!n) return;
 
     int chars;
@@ -839,7 +763,7 @@ void dump_dot(struct node *n, FILE *f) {
     #define GEND fprintf(f, "\"];\n")
 
 #ifdef DEBUG_ID
-    fprintf(f, "    n%p [label=\"(%d)\n%s\n", (void *)n, n->id, opmap(n->op));
+    fprintf(f, "    n%p [label=\"(%d)\n%s\n", (void *)n, NODE_ID(ctx, n), opmap(n->op));
 #else
     fprintf(f, "    n%p [label=\"%s\n", (void *)n, opmap(n->op));
 #endif
@@ -897,20 +821,20 @@ void dump_dot(struct node *n, FILE *f) {
 
     if (n->a && (n->a != NOTUSED)) {
         fprintf(f, "    n%p -> n%p [label=\"a\"];\n", (void*)n, (void*)n->a);
-        dump_dot(n->a, f);
+        dump_dot(ctx, n->a, f);
     }
 
 bonly:
     if (n->b && (n->b != NOTUSED)) {
         fprintf(f, "    n%p -> n%p [label=\"b\"];\n", (void*)n, (void*)n->b);
-        dump_dot(n->b, f);
+        dump_dot(ctx, n->b, f);
     }
 }
 
-void export_tree(struct node *root, const char *filename) {
+void export_tree(struct rectx *ctx, const char *filename) {
     FILE *f = fopen(filename, "w");
     fprintf(f, "digraph tree {\n");
-    dump_dot(root, f);
+    dump_dot(ctx, ctx->root, f);
     fprintf(f, "}\n");
     fclose(f);
 }
@@ -918,19 +842,18 @@ void export_tree(struct node *root, const char *filename) {
 int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abc?def+ghi", 0);
 //    struct rectx *ctx = re_compile("abc(def|ghi)jkl[a-z]", 0);
-//    struct rectx *ctx = re_compile("[a-z]", F_CASELESS);
+    struct rectx *ctx = re_compile("[a-z]+", F_CASELESS);
 //    struct rectx *ctx = re_compile("ab(?:cd|ef){2,4}g+?\\1[a-z]$", 0);
 
 //    struct rectx *ctx = re_compile("ab[\\d]+c+", 0);
 //    struct rectx *ctx = re_compile("a+(bc)d*{2,5}[\\d123]+e", 0);
-    struct rectx *ctx = re_compile("(a|(bcde)|c)+(a)*c?$", 0);
-    export_tree(ctx->root, "tree.dot");
+//    struct rectx *ctx = re_compile("abcd", 0);
+    export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "abcdcdxcdcdcdxe", 0);
+    int x = re_match(ctx, "abcd", 0);
 
 
-    tree_free(ctx);
-    free(ctx);
+    re_free(ctx);
 //    struct set *s = build_set("[a-zA-Z0-9]");
 //    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
 
