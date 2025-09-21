@@ -158,10 +158,17 @@ fail:
 // -------------------------------------------------------------------------------
 // TASKS
 // -------------------------------------------------------------------------------
+#define TASK_STACK_SIZE      3
+
 struct task {
     struct task *next;          // tasks are singly linked
     struct node *n;             // current node
     struct node *last;          // last one we processed (for direction)
+
+    // Stack mechanism for {x,y} counting
+    uint16_t        sp;         // more an index than pointer (smaller)
+    uint16_t        stack[TASK_STACK_SIZE];
+
 };
 
 static int tcount = 0;
@@ -503,7 +510,10 @@ struct task *task_new(struct task *from, struct task *next, struct node *last, s
     if (!task) return NULL;
 
     if (from) {
-        // TODO: copy from
+        memcpy(task->stack, from->stack, sizeof(task->stack));
+        task->sp = from->sp;
+    } else {
+        task->sp = TASK_STACK_SIZE;
     }
     task->next = next;
     task->last = last;
@@ -584,6 +594,51 @@ int re_match(struct rectx *ctx, char *p, int len) {
                 case OP_END:
                     if (*p == 0) goto parent;
                     goto die;
+
+                // If we come from above then get a new stack position and init, otherwise
+                // count until we hit min, then spawn until max...
+                case OP_MULT:
+                    if (t->last == n->parent) {
+                        if (t->sp == 0) {
+                            // TODO: stack error
+                            fprintf(stderr, "stack nesting too deep.\n");
+                            goto die;
+                        }
+                        t->sp--;
+                        t->stack[t->sp] = 0;
+                    }
+                    // If we've hit max, then go back up...
+                    if (t->stack[t->sp] == n->max) { t->sp++; goto parent; }
+
+                    // Normal op .. inc if under absolute max
+                    if (t->stack[t->sp] < NO_MAX) t->stack[t->sp]++;
+                    
+                    // If we haven't hit min, then do b again...
+                    if (t->stack[t->sp] <= n->min) goto leg_b;
+
+                    // We must have hit min, so need to spawn...
+                    if (n->lazy) {
+                        t->next = task_new(t, t->next, n, n->b);
+                        t->n = n->parent;
+                        t->sp++;        // parent
+                    } else {
+                        t->next = task_new(t, t->next, n, n->parent);
+                        t->next->sp++;  // parent
+                        t->n = n->b;
+                    }
+                    t->last = n;
+                    continue;
+
+                case OP_GROUP:
+                    if (t->last == n->b) {
+                        // On the way back up...
+                        t->n = n->parent;
+                    } else {
+                        // Going down leg b...
+                        t->n = n->b;
+                    }
+                    t->last = n;
+                    continue;
 
                 // If we match we just go back up but let the next task run. If we
                 // fail then we die.
@@ -769,10 +824,10 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("ab(?:cd|ef){2,4}g+?\\1[a-z]$", 0);
 
 //    struct rectx *ctx = re_compile("ab[\\d]+c+", 0);
-    struct rectx *ctx = re_compile("ab.*c", 0);
+    struct rectx *ctx = re_compile("ab((((cd){2,4}x){2}e){1}){1}", 0);
     export_tree(ctx->root, "tree.dot");
 
-    int x = re_match(ctx, "abccccccccccccccccc", 0);
+    int x = re_match(ctx, "abcdcdxcdcdcdxe", 0);
 
 
     tree_free(ctx);
