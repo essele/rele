@@ -272,6 +272,26 @@ fail:
     return NULL;
 }
 
+// Used when parsing the regex to work out scale, we just need to get past
+// the set syntax in the same way as above... we don't error check in here
+// other than not running off the end...
+char *dummy_set(char *p) {
+    p++;            // get past the '['
+    if (*p == '^') { p++; }
+    while (*p) {
+        if (*p == ']') break;           // done
+        if (p[1] == '-' && p[2] && p[2] != ']') {
+            p += 3;           
+        } else {
+            if (*p == '\\') {
+                p++;
+            }
+            p++;
+        }
+    }
+    return p;
+}
+
 static void set_free(struct set *set) {
     free(set);
 }
@@ -308,9 +328,82 @@ char *minmax(char *p, struct node *n) {
     if (*p != '}' || max < min) return NULL;
 
 done:
-    n->min = min;
-    n->max = max;
+    if (n) {
+        n->min = min;
+        n->max = max;
+    }
     return p;
+}
+
+// ------------------------------------------------------------------------
+// Dummy (and hopefully fast) version of the compiler that is purely used
+// to measure how many nodes and sets this regex will need.
+// ------------------------------------------------------------------------
+struct rectx *calc_scale(char *regex) {
+    int matches = 0;
+    int nodes = 0;
+    int sets = 0;
+
+    uint8_t last_op = 0;
+
+    char *p = regex;
+    while (*p) {
+
+        // There's always a match at the end of a given brach, therefore matches
+        // are the key. We will always have one less "splits" (i.e. concat or 
+        // alternate) than we have matches, everything else is always a node.
+
+        switch (*p) {
+            case OP_PLUS:
+            case OP_STAR:
+            case OP_QUESTION:
+            case OP_GROUP:
+                nodes++;
+                break;
+
+            case ')':
+                // ignore a close group
+                break;
+
+            case OP_ALTERNATE:
+                // ignore these, we'll treat them like concats later
+                break;
+
+            case OP_MULT:
+                p = minmax(p, NULL);
+                last_op = OP_MULT;
+                nodes++;
+                break;
+
+            case OP_MATCHSET:
+                p = dummy_set(p);
+                sets++;
+                // fall through
+
+            // These are effectively matches...
+            case OP_BEGIN:
+            case OP_END:
+            default:
+                matches++;
+                break;
+
+        }
+        p++;
+    }
+
+    // Done is like a match ...
+    matches++;
+    fprintf(stderr, "We have %d matches\n", matches);
+    
+    // We need one less splitter than matches
+    int splits = matches - 1;
+
+    fprintf(stderr, "splits = %d\n", splits);
+
+    nodes += matches + splits;
+
+    fprintf(stderr, "We have %d nodes and %d sets\n", nodes, sets);
+    return NULL;
 }
 
 
@@ -324,6 +417,8 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
     if (!ctx) return NULL;
     memset((void *)ctx, 0, sizeof(struct rectx));
     ctx->flags = flags;
+
+    calc_scale(regex);
 
     // Now run through the regex...
     char        *p = regex;
@@ -400,8 +495,10 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
         p++;
     }
     // Now some postprocessing, currently just adding an OP_DONE so we can easily
-    // recognise the end of the tree.
-    create_node_here(ctx, last, OP_DONE, NULL, NULL);
+    // recognise the end of the tree. We need to ensure this is post any alternates
+    // to the best option is to concat it with the head...
+    last = create_node_above(ctx, ctx->root, OP_CONCAT, ctx->root, NULL);
+    last = create_node_here(ctx, last, OP_DONE, NULL, NULL);
     return ctx;
 
 fail:
@@ -721,6 +818,7 @@ char *opmap(uint8_t op) {
         case OP_END:        return "END";
         case OP_CONCAT:     return "CONCAT";
         case OP_PLUS:       return "PLUS";
+        case OP_STAR:       return "STAR";
         case OP_NOP:        return "NOP";
         case OP_QUESTION:   return "QUESTION";
         case OP_ALTERNATE:  return "ALTERNATE";
@@ -824,7 +922,8 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("ab(?:cd|ef){2,4}g+?\\1[a-z]$", 0);
 
 //    struct rectx *ctx = re_compile("ab[\\d]+c+", 0);
-    struct rectx *ctx = re_compile("ab((((cd){2,4}x){2}e){1}){1}", 0);
+//    struct rectx *ctx = re_compile("a+(bc)d*{2,5}[\\d123]+e", 0);
+    struct rectx *ctx = re_compile("(a|(bcde)|c)+(a)*c?$", 0);
     export_tree(ctx->root, "tree.dot");
 
     int x = re_match(ctx, "abcdcdxcdcdcdxe", 0);
