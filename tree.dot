@@ -1,17 +1,89 @@
 digraph tree {
-    n0x4a8f0a0 [label="(2)
+    n0xb4ab1fd66550 [label="(21)
 CONCAT
 "];
-    n0x4a8f0a0 -> n0x4a8f080 [label="a"];
-    n0x4a8f080 [label="(1)
+    n0xb4ab1fd66550 -> n0xb4ab1fd66310 [label="a"];
+    n0xb4ab1fd66310 [label="(3)
+CONCAT
+"];
+    n0xb4ab1fd66310 -> n0xb4ab1fd662d0 [label="a"];
+    n0xb4ab1fd662d0 [label="(1)
+MATCH
+'a'"];
+    n0xb4ab1fd66310 -> n0xb4ab1fd66350 [label="b"];
+    n0xb4ab1fd66350 [label="(5)
+CONCAT
+"];
+    n0xb4ab1fd66350 -> n0xb4ab1fd662f0 [label="a"];
+    n0xb4ab1fd662f0 [label="(2)
+MATCH
+'b'"];
+    n0xb4ab1fd66350 -> n0xb4ab1fd663f0 [label="b"];
+    n0xb4ab1fd663f0 [label="(10)
+CONCAT
+"];
+    n0xb4ab1fd663f0 -> n0xb4ab1fd66330 [label="a"];
+    n0xb4ab1fd66330 [label="(4)
+GROUP
+1"];
+    n0xb4ab1fd66330 -> n0xb4ab1fd663b0 [label="b"];
+    n0xb4ab1fd663b0 [label="(8)
+CONCAT
+"];
+    n0xb4ab1fd663b0 -> n0xb4ab1fd66370 [label="a"];
+    n0xb4ab1fd66370 [label="(6)
+MATCH
+'.'"];
+    n0xb4ab1fd663b0 -> n0xb4ab1fd66390 [label="b"];
+    n0xb4ab1fd66390 [label="(7)
+MATCH
+'.'"];
+    n0xb4ab1fd663f0 -> n0xb4ab1fd66430 [label="b"];
+    n0xb4ab1fd66430 [label="(12)
+CONCAT
+"];
+    n0xb4ab1fd66430 -> n0xb4ab1fd663d0 [label="a"];
+    n0xb4ab1fd663d0 [label="(9)
+MATCH
+'a'"];
+    n0xb4ab1fd66430 -> n0xb4ab1fd66470 [label="b"];
+    n0xb4ab1fd66470 [label="(14)
+CONCAT
+"];
+    n0xb4ab1fd66470 -> n0xb4ab1fd66410 [label="a"];
+    n0xb4ab1fd66410 [label="(11)
+MATCH
+'b'"];
+    n0xb4ab1fd66470 -> n0xb4ab1fd664b0 [label="b"];
+    n0xb4ab1fd664b0 [label="(16)
+CONCAT
+"];
+    n0xb4ab1fd664b0 -> n0xb4ab1fd66450 [label="a"];
+    n0xb4ab1fd66450 [label="(13)
+MATCH
+'c'"];
+    n0xb4ab1fd664b0 -> n0xb4ab1fd66530 [label="b"];
+    n0xb4ab1fd66530 [label="(20)
+CONCAT
+"];
+    n0xb4ab1fd66530 -> n0xb4ab1fd66490 [label="a"];
+    n0xb4ab1fd66490 [label="(15)
+GROUP
+2"];
+    n0xb4ab1fd66490 -> n0xb4ab1fd664f0 [label="b"];
+    n0xb4ab1fd664f0 [label="(18)
 PLUS
 "];
-    n0x4a8f080 -> n0x4a8f060 [label="b"];
-    n0x4a8f060 [label="(0)
-MATCHSET
-52 chars"];
-    n0x4a8f0a0 -> n0x4a8f0c0 [label="b"];
-    n0x4a8f0c0 [label="(3)
+    n0xb4ab1fd664f0 -> n0xb4ab1fd664d0 [label="b"];
+    n0xb4ab1fd664d0 [label="(17)
+MATCH
+'\d'"];
+    n0xb4ab1fd66530 -> n0xb4ab1fd66510 [label="b"];
+    n0xb4ab1fd66510 [label="(19)
+MATCH
+'h'"];
+    n0xb4ab1fd66550 -> n0xb4ab1fd66570 [label="b"];
+    n0xb4ab1fd66570 [label="(22)
 DONE
 "];
 }

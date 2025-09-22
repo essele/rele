@@ -19,6 +19,11 @@
 // Compile flags...
 #define F_CASELESS  (1 << 0)
 
+// A type used for matching groups...
+struct re_match_t {
+    char        *ptr;
+    uint32_t    len;
+};
 
 
 enum {
@@ -44,7 +49,6 @@ struct node {
             uint16_t    max;
         };
        uint8_t          group;      // for creating groups
-       uint8_t          lazy;       // for PLUS, STAR, and QUESTION
     };
     union {
         struct node     *b;         // the second child
@@ -54,8 +58,8 @@ struct node {
     };
     struct node         *parent;        // for a way back
     uint8_t             op;             // which operation?
-    // Three bytes unused here...
-    // TODO: lazy needs to exist with min/max
+    uint8_t             lazy;           // won't fit in a with minmax
+    // Two bytes unused here...
 };
 
 
@@ -73,6 +77,10 @@ struct rectx {
 
     struct node     *nodes;     // current node pointer
     struct set      *sets;      // current set pointer
+
+    struct task     *free_list; // free tasks list
+
+    int             groups;     // how many groups in the regex
 
     // Memory for nodes and sets will follow this...
 };
@@ -145,9 +153,10 @@ struct task {
     uint16_t        sp;         // more an index than pointer (smaller)
     uint16_t        stack[TASK_STACK_SIZE];
 
+    struct re_match_t   grp[];
 };
 
-static int tcount = 0;
+static int tcount = 0;      // TODO: might want to remove
 
 // -------------------------------------------------------------------------------
 // SETS (of characters or ranges etc)
@@ -371,11 +380,11 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
     struct rectx *ctx = alloc_ctx(regex);
     if (!ctx) return NULL;
     ctx->flags = flags;
+    ctx->groups = 1;
 
     // Now run through the regex...
     char        *p = regex;
     struct node *last = NULL;
-    uint8_t     group = 1;
     int         lazy;
 
     while (*p) {
@@ -401,13 +410,15 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                     last->group = NO_GROUP;
                     p += 2;
                 } else {
-                    last->group = group++;
+                    last->group = ctx->groups++;
                 }
                 break;
 
             case OP_MULT:
                 last = create_node_above(ctx, last, OP_MULT, NULL, last);
                 p = minmax(p, last);
+                if (!p) goto fail;
+                if (p[1] == '?') { last->lazy = 1; p++; }
                 break;
 
             case ')':       // ending a group
@@ -503,15 +514,15 @@ int matchone(char *p, char ch) {
 // -------------------------------------------------------------------------------
 
 // Create a new task, optionally copying any state from the 'from' task
-struct task *task_new(struct task *from, struct task *next, struct node *last, struct node *node, struct task **free_list) {
-    struct task *task;
+struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, struct node *last, struct node *node) {
+    struct task *task = ctx->free_list;
 
-    if (*free_list) {
+    if (task) {
         fprintf(stderr, "reusing task\n");
-        task = *free_list;
-        *free_list = task->next;
+        ctx->free_list = task->next;
     } else {
-        task = (struct task *)malloc(sizeof(struct task));
+        // Allocate a task with enough space for gorup matching...
+        task = (struct task *)malloc(sizeof(struct task) + (ctx->groups * sizeof(struct re_match_t)));
         if (!task) return NULL;
         memset((void *)task, 0, sizeof(struct task));
 
@@ -520,9 +531,13 @@ struct task *task_new(struct task *from, struct task *next, struct node *last, s
     }
 
     if (from) {
+        // Copy the stack and group matches...
         memcpy(task->stack, from->stack, sizeof(task->stack));
+        memcpy(task->grp, from->grp, sizeof(struct re_match_t) * ctx->groups);
         task->sp = from->sp;
     } else {
+        // Make sure matches are zero to start...
+        memset(task->grp, 0, sizeof(struct re_match_t) * ctx->groups);
         task->sp = TASK_STACK_SIZE;
     }
     task->next = next;
@@ -531,16 +546,15 @@ struct task *task_new(struct task *from, struct task *next, struct node *last, s
     return task;
 }
 
-void task_release(struct task *task, struct task **free_list) {
-    task->next = *free_list;
-    *free_list = task;
+void task_release(struct rectx *ctx, struct task *task) {
+    task->next = ctx->free_list;
+    ctx->free_list = task;
 }
 
 
 int re_match(struct rectx *ctx, char *p, int len) {
     // Create the first task on the list...
-    struct task *free_list = NULL;
-    struct task *run_list = task_new(NULL, NULL, NULL, ctx->root, &free_list);
+    struct task *run_list = task_new(ctx, NULL, NULL, NULL, ctx->root);
 
     // Keep track of the previous one so we can remove items
     struct task *prev = NULL;
@@ -580,7 +594,7 @@ int re_match(struct rectx *ctx, char *p, int len) {
                 // and we go down leg a. Anything coming back up, goes to the parent.
                 case OP_ALTERNATE:
                     if (t->last == n->parent) {
-                        t->next = task_new(t, t->next, n, n->b, &free_list);
+                        t->next = task_new(ctx, t, t->next, n, n->b);
                         goto leg_a;
                     }
                     goto parent;
@@ -634,11 +648,11 @@ int re_match(struct rectx *ctx, char *p, int len) {
 
                     // We must have hit min, so need to spawn...
                     if (n->lazy) {
-                        t->next = task_new(t, t->next, n, n->b, &free_list);
+                        t->next = task_new(ctx, t, t->next, n, n->b);
                         t->n = n->parent;
                         t->sp++;        // parent
                     } else {
-                        t->next = task_new(t, t->next, n, n->parent, &free_list);
+                        t->next = task_new(ctx, t, t->next, n, n->parent);
                         t->next->sp++;  // parent
                         t->n = n->b;
                     }
@@ -647,11 +661,13 @@ int re_match(struct rectx *ctx, char *p, int len) {
 
                 case OP_GROUP:
                     if (t->last == n->b) {
-                        // On the way back up...
+                        // On the way back up... fill in the length
                         t->n = n->parent;
+                        if (n->group != NO_GROUP) { t->grp[n->group].len = (uint32_t)(p - t->grp[n->group].ptr); }
                     } else {
-                        // Going down leg b...
+                        // Going down leg b... mark the start
                         t->n = n->b;
+                        if (n->group != NO_GROUP) { t->grp[n->group].ptr = p; }
                     }
                     t->last = n;
                     continue;
@@ -682,7 +698,7 @@ int re_match(struct rectx *ctx, char *p, int len) {
 
 // Reused outcomes for the different operations...
 
-new_b_or_parent:    t->next = task_new(t, t->next, n, (n->lazy ? n->b : n->parent), &free_list);
+new_b_or_parent:    t->next = task_new(ctx, t, t->next, n, (n->lazy ? n->b : n->parent));
                     t->n = (n->lazy ? n->parent : n->b);
                     t->last = n;
                     continue;
@@ -704,9 +720,9 @@ next:               prev = t;
                     continue;
 
 die:                if (prev) {
-                        prev->next = t->next; task_release(t, &free_list); t = prev->next;
+                        prev->next = t->next; task_release(ctx, t); t = prev->next;
                     } else {
-                        run_list = t->next; task_release(t, &free_list); t = run_list;
+                        run_list = t->next; task_release(ctx, t); t = run_list;
                     }
                     continue;
             }
@@ -720,13 +736,24 @@ done:
     if (t) {
         // If t is set, then that's the one that finished first
         fprintf(stderr, "task=%p node=%p nid=%d *p=%d\n", t, t->n, NODE_ID(ctx, t->n), *p);
+        // Output the groups....
+        for (int i=0; i < ctx->groups; i++) {
+            int len = t->grp[i].len;
+            if (len) {
+                fprintf(stderr, "GRP %d: [%.*s] (%d)\n", i, len, t->grp[i].ptr, len);
+            } else {
+                fprintf(stderr, "GRP %d: no match\n", i);
+            }
+        }
     } else {
         fprintf(stderr, "match failed\n");
     }
 
+
+
     // Ok, now we need to free up all the tasks, they will either be in the run list
     // or the free list
-    while (free_list) { struct task *x = free_list->next; free(free_list); free_list = x; }
+    while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
     while (run_list) { struct task *x = run_list->next; free(run_list); run_list = x; }
 }
 
@@ -802,7 +829,11 @@ void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
             goto bonly;
 
         case OP_MULT:
-            fprintf(f, "min=%d max=%d", n->min, n->max);
+            if (n->lazy) { 
+                fprintf(f, "min=%d max=%d lazy", n->min, n->max);
+            } else {
+                fprintf(f, "min=%d max=%d", n->min, n->max);
+            }
             GEND;
             goto bonly;
 
@@ -842,15 +873,17 @@ void export_tree(struct rectx *ctx, const char *filename) {
 int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abc?def+ghi", 0);
 //    struct rectx *ctx = re_compile("abc(def|ghi)jkl[a-z]", 0);
-    struct rectx *ctx = re_compile("[a-z]+", F_CASELESS);
+//    struct rectx *ctx = re_compile("[a-z]+", F_CASELESS);
 //    struct rectx *ctx = re_compile("ab(?:cd|ef){2,4}g+?\\1[a-z]$", 0);
 
 //    struct rectx *ctx = re_compile("ab[\\d]+c+", 0);
 //    struct rectx *ctx = re_compile("a+(bc)d*{2,5}[\\d123]+e", 0);
 //    struct rectx *ctx = re_compile("abcd", 0);
+
+    struct rectx *ctx = re_compile("ab(..)abc(\\d+)h", 0);
     export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "abcd", 0);
+    int x = re_match(ctx, "abjjabc1234h", 0);
 
 
     re_free(ctx);
