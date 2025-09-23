@@ -134,6 +134,7 @@ static struct node *create_node_here(struct rectx *ctx, struct node *last, uint8
     } else {
         // We need a concat...
         n->parent = create_node_above(ctx, last, OP_CONCAT, last, n);
+        fprintf(stderr, "concat needed above %d, concat id is %d\n", NODE_ID(ctx, last), NODE_ID(ctx, n->parent));
     }
     return n;
 }
@@ -153,6 +154,12 @@ struct task {
     uint16_t        sp;         // more an index than pointer (smaller)
     uint16_t        stack[TASK_STACK_SIZE];
 
+    // Pointer to check for repeated matches of non-char things
+    // (like empty groups), I hate the extra space need, but otherwise
+    // it's easy to get infinite tasks spawning
+    struct node *lastghostmatch;
+
+    // All of the group matches follow...
     struct re_match_t   grp[];
 };
 
@@ -319,12 +326,18 @@ struct rectx *alloc_ctx(char *regex) {
                 // drop through...
 
             // These are always a node...
-            case OP_PLUS: case OP_STAR: case OP_QUESTION: case OP_GROUP:
+            case OP_PLUS: case OP_STAR: case OP_QUESTION:
                 nodes++;
                 break;
 
+            // An empty group counts as a node and a match...
+            case OP_GROUP:
+                if (p[1] != ')' || (p[1] == '?' && p[2] == ':' && p[3] == ')')) { matches++; }
+                nodes++;
+                break; 
+
             // Ignore these (alternate we'll do later)...
-            case ')': case OP_ALTERNATE:
+            case OP_ALTERNATE:
                 break;
 
             case OP_MATCHSET:
@@ -412,6 +425,36 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 } else {
                     last->group = ctx->groups++;
                 }
+                fprintf(stderr, "Created group %d node id is %d (parent id=%d)\n", last->group, NODE_ID(ctx, last), NODE_ID(ctx, last->parent));
+                break;
+
+            case ')':       // closing a group
+
+                // Logic is a little complex....
+                // We need to get back to the previous group...
+                //  If we aren't a group, then just to back to the last one.
+                //  If we are a used group, then go back to the prior one
+                //  If we are an empty group, then mark it used, so we go back next time.
+                if (last && last->op == OP_GROUP && !last->b) {
+                    // This is an empty group, so just mark it NOTUSED
+                    last->b = NOTUSED;
+                    break;
+                }
+                if (last && last->op == OP_GROUP) {
+                    // We need to ensure we go up at least one...
+                    last = last->parent;
+                }
+                while(last && last->op != OP_GROUP) { last = last->parent; }
+
+
+//                fprintf(stderr, "Close group current node id %d\n", NODE_ID(ctx, last));
+                // If the group was empty, then mark it so...
+//                if (last && last->op == OP_GROUP) { last->b = NOTUSED; }
+                //if (last && last->op == OP_GROUP) { last = last->parent; }
+//                while (last && last->op != OP_GROUP) { last = last->parent; }
+                //last = last->parent;
+                fprintf(stderr, "Closed group back to node id %d\n", NODE_ID(ctx, last));
+
                 break;
 
             case OP_MULT:
@@ -419,10 +462,6 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 p = minmax(p, last);
                 if (!p) goto fail;
                 if (p[1] == '?') { last->lazy = 1; p++; }
-                break;
-
-            case ')':       // ending a group
-                while (last && last->op != OP_GROUP) { last = last->parent; }
                 break;
 
             case OP_BEGIN:
@@ -535,10 +574,12 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
         memcpy(task->stack, from->stack, sizeof(task->stack));
         memcpy(task->grp, from->grp, sizeof(struct re_match_t) * ctx->groups);
         task->sp = from->sp;
+        task->lastghostmatch = from->lastghostmatch;
     } else {
         // Make sure matches are zero to start...
         memset(task->grp, 0, sizeof(struct re_match_t) * ctx->groups);
         task->sp = TASK_STACK_SIZE;
+        task->lastghostmatch = NULL;
     }
     task->next = next;
     task->last = last;
@@ -660,6 +701,21 @@ int re_match(struct rectx *ctx, char *p, int len) {
                     continue;
 
                 case OP_GROUP:
+                    // If we hit an empty group, then make sure we haven't just hit it,
+                    // in which case we die otherwise we proceed back up to the parent
+                    if (n->b == NOTUSED) {
+                        if (t->lastghostmatch == n) {
+                            // This is a second hit here, so we need to die to avoid
+                            // inifinite tasks
+                            goto die;
+                        }
+                        t->lastghostmatch = n;
+                        t->n = n->parent;
+                        t->last = n;
+                        t->grp[n->group].ptr = p;
+                        t->grp[n->group].len = 0;
+                        continue;
+                    }
                     if (t->last == n->b) {
                         // On the way back up... fill in the length
                         t->n = n->parent;
@@ -679,6 +735,7 @@ int re_match(struct rectx *ctx, char *p, int len) {
                     if (ch && matchone(n->ch, ch)) {
                         t->last = n;
                         t->n = n->parent;
+                        t->lastghostmatch = NULL;
                         goto next;
                     }
                     goto die;
@@ -688,6 +745,7 @@ int re_match(struct rectx *ctx, char *p, int len) {
                     if (match_set(ch, set)) {
                         t->last = n;
                         t->n = n->parent;
+                        t->lastghostmatch = NULL;
                         goto next;
                     }
                     goto die;
@@ -738,9 +796,10 @@ done:
         fprintf(stderr, "task=%p node=%p nid=%d *p=%d\n", t, t->n, NODE_ID(ctx, t->n), *p);
         // Output the groups....
         for (int i=0; i < ctx->groups; i++) {
+            char * p = t->grp[i].ptr;
             int len = t->grp[i].len;
-            if (len) {
-                fprintf(stderr, "GRP %d: [%.*s] (%d)\n", i, len, t->grp[i].ptr, len);
+            if (p) {
+                fprintf(stderr, "GRP %d: [%.*s] (len=%d offset=%d)\n", i, len, t->grp[i].ptr, len, (int)(p-start));
             } else {
                 fprintf(stderr, "GRP %d: no match\n", i);
             }
@@ -787,7 +846,7 @@ void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
 
     int chars;
 
-    #define GEND fprintf(f, "\"];\n")
+#define GEND fprintf(f, "\"];\n")
 
 #ifdef DEBUG_ID
     fprintf(f, "    n%p [label=\"(%d)\n%s\n", (void *)n, NODE_ID(ctx, n), opmap(n->op));
@@ -880,13 +939,16 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("a+(bc)d*{2,5}[\\d123]+e", 0);
 //    struct rectx *ctx = re_compile("abcd", 0);
 
-    struct rectx *ctx = re_compile("ab(..)abc(\\d+)h", 0);
+    //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
+    struct rectx *ctx = re_compile("def(()+)+", 0);
+ 
+ fprintf(stderr, "here\n");
     export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "abjjabc1234h", 0);
+    int x = re_match(ctx, "def", 0);
 
 
-    re_free(ctx);
+ //   re_free(ctx);
 //    struct set *s = build_set("[a-zA-Z0-9]");
 //    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
 
