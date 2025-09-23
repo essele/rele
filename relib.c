@@ -8,11 +8,11 @@ int main(int argc, char *argv[]) {
     regex_t regex;
     regmatch_t  pmatch[5];
 
-    if (regcomp(&regex, "abc((a|()|c)+)def", REG_EXTENDED))
+    if (regcomp(&regex, "(a+)a", REG_EXTENDED))
         exit(EXIT_FAILURE);
 
 
-    char *string = "abcacdef";
+    char *string = "helloaaaaaabcdef";
 
     int res = regexec(&regex, string, ARRAY_SIZE(pmatch), pmatch, 0);
     fprintf(stderr, "res = %d\n", res);

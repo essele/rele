@@ -19,6 +19,10 @@
 // Compile flags...
 #define F_CASELESS  (1 << 0)
 
+
+// Internal flags ... created by compile stage
+#define IF_NOT_LAZY (1 << 15)
+
 // A type used for matching groups...
 struct re_match_t {
     char        *ptr;
@@ -73,14 +77,16 @@ struct node {
 struct rectx {
     struct node     *root;
 
-    uint32_t        flags;      // TODO: doesn't need to be 32 bits?
 
     struct node     *nodes;     // current node pointer
     struct set      *sets;      // current set pointer
 
     struct task     *free_list; // free tasks list
+    struct task     *done;      // the candiate completed task
 
-    int             groups;     // how many groups in the regex
+    uint16_t        flags;
+    uint8_t         groups;     // allows up to 255 groups
+    uint8_t         pad;        // not used
 
     // Memory for nodes and sets will follow this...
 };
@@ -146,18 +152,21 @@ static struct node *create_node_here(struct rectx *ctx, struct node *last, uint8
 #define TASK_STACK_SIZE      3
 
 struct task {
-    struct task *next;          // tasks are singly linked
-    struct node *n;             // current node
-    struct node *last;          // last one we processed (for direction)
+    struct task         *next;          // tasks are singly linked
+    struct node         *n;             // current node
+    union {
+        struct node         *last;          // last one we processed (for direction)
+        char                *p;             // pointer to the DONE index
+    };
 
     // Stack mechanism for {x,y} counting
-    uint16_t        sp;         // more an index than pointer (smaller)
-    uint16_t        stack[TASK_STACK_SIZE];
+    uint16_t            sp;         // more an index than pointer (smaller)
+    uint16_t            stack[TASK_STACK_SIZE];
 
     // Pointer to check for repeated matches of non-char things
     // (like empty groups), I hate the extra space need, but otherwise
     // it's easy to get infinite tasks spawning
-    struct node *lastghostmatch;
+    struct node         *lastghostmatch;
 
     // All of the group matches follow...
     struct re_match_t   grp[];
@@ -327,17 +336,18 @@ struct rectx *alloc_ctx(char *regex) {
 
             // These are always a node...
             case OP_PLUS: case OP_STAR: case OP_QUESTION:
+                if (p[1] == '?') p++;       // lazy version
                 nodes++;
                 break;
 
             // An empty group counts as a node and a match...
             case OP_GROUP:
-                if (p[1] != ')' || (p[1] == '?' && p[2] == ':' && p[3] == ')')) { matches++; }
+                if (p[1] == ')' || (p[1] == '?' && p[2] == ':' && p[3] == ')')) { matches++; }
                 nodes++;
                 break; 
 
-            // Ignore these (alternate we'll do later)...
-            case OP_ALTERNATE:
+            // Ignore these (alternate we cover via matches)...
+            case OP_ALTERNATE: case ')':
                 break;
 
             case OP_MATCHSET:
@@ -346,23 +356,28 @@ struct rectx *alloc_ctx(char *regex) {
                 // drop through
 
             // These are effectively matches...
-            case OP_BEGIN: case OP_END: default:
+            case OP_BEGIN: case OP_END:
+                matches++;
+                break;
+
+            default:
+            // TODO: cater for proper group terminology
+                if (*p == '\\') p++;
                 matches++;
                 break;
         }
         p++;
     }
 
-    // Done is like a match ...
-    matches++;
-    fprintf(stderr, "We have %d matches\n", matches);
+    fprintf(stderr, "We have %d matches and %d nodes\n", matches, nodes);
     
     // We need one less splitter than matches
     int splits = matches - 1;
 
     fprintf(stderr, "splits = %d\n", splits);
 
-    nodes += matches + splits;
+    // We also need space for our extra added nodes
+    nodes += matches + splits + 6;
 
     fprintf(stderr, "We have %d nodes and %d sets\n", nodes, sets);
 
@@ -400,6 +415,14 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
     struct node *last = NULL;
     int         lazy;
 
+    // Early part of the tree.... ".*(main)", so a DOT STAR (lazy) and
+    // a GROUP 0...
+    last = create_node_here(ctx, last, OP_MATCH, NULL, (struct node *)'.');
+    last = create_node_above(ctx, last, OP_STAR, NULL, last);
+    last->lazy = 1;
+    last = create_node_here(ctx, last, OP_GROUP, NULL, NULL);
+    last->group = 0;
+
     while (*p) {
         switch (*p) {
             case OP_PLUS:
@@ -409,6 +432,7 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 last = create_node_above(ctx, last, (uint8_t)*p, NULL, last);
                 last->lazy = lazy;
                 p += lazy;              // skip the ? if we have it
+                if (!lazy) ctx->flags |= IF_NOT_LAZY;
                 break;
 
             case OP_ALTERNATE:
@@ -445,23 +469,18 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                     last = last->parent;
                 }
                 while(last && last->op != OP_GROUP) { last = last->parent; }
-
-
-//                fprintf(stderr, "Close group current node id %d\n", NODE_ID(ctx, last));
-                // If the group was empty, then mark it so...
-//                if (last && last->op == OP_GROUP) { last->b = NOTUSED; }
-                //if (last && last->op == OP_GROUP) { last = last->parent; }
-//                while (last && last->op != OP_GROUP) { last = last->parent; }
-                //last = last->parent;
-                fprintf(stderr, "Closed group back to node id %d\n", NODE_ID(ctx, last));
-
                 break;
 
             case OP_MULT:
                 last = create_node_above(ctx, last, OP_MULT, NULL, last);
                 p = minmax(p, last);
                 if (!p) goto fail;
-                if (p[1] == '?') { last->lazy = 1; p++; }
+                if (p[1] == '?') { 
+                    last->lazy = 1; 
+                    p++; 
+                } else {
+                    ctx->flags |= IF_NOT_LAZY;
+                }
                 break;
 
             case OP_BEGIN:
@@ -478,6 +497,7 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
 
             default:
                 if (*p == '\\' && p[1] >= '1' && p[1] <= '9') {
+                    // TODO: cater for larger numeric groups \10 \11, or \{12} or \g1 \g{4} etc.
                     // This is a \1 type match on a group
                     last = create_node_here(ctx, last, OP_MATCHGRP, NULL, NULL);
                     if (!last) goto fail;
@@ -492,15 +512,12 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                         if (!*p) goto fail;         // backslash on the end!
                     }
                 }
-            
         }
         p++;
     }
-    // Now some postprocessing, currently just adding an OP_DONE so we can easily
-    // recognise the end of the tree. We need to ensure this is post any alternates
-    // to the best option is to concat it with the head...
-    last = create_node_above(ctx, ctx->root, OP_CONCAT, ctx->root, NULL);
-    last = create_node_here(ctx, last, OP_DONE, NULL, NULL);
+    // Postprocessing just needs to ensure there's a DONE in the right place
+    // We put it after the group b node to save one more parent move.
+    last = create_node_here(ctx, ctx->root->b, OP_DONE, NULL, NULL);
     return ctx;
 
 fail:
@@ -613,6 +630,8 @@ int re_match(struct rectx *ctx, char *p, int len) {
         t = run_list;
         prev = NULL;
 
+        if (!t) goto done;
+
         // Now for each task go through the binary tree until we get to
         // a match type op, then we either die (match failed), or we stay
         // for next time.
@@ -620,11 +639,34 @@ int re_match(struct rectx *ctx, char *p, int len) {
             struct node *n = t->n;
 
             switch(n->op) {
-                // If we get to OP_DONE then we are done, we need to 
-                // be at a zero to be successful
+                // If we get to OP_DONE then we are done, but there might be other
+                // tasks to continue. We keep the first task completed at each index,
+                // then overwrite for the next one.
+                //
+                // If our regex is ALL lazy, then the first completed is the answer!
+                //
                 case OP_DONE:
-                    if (ch != 0) goto die;
-                    goto done;
+                    fprintf(stderr, "DONE for %p\n", t);
+                    // If we have already completed at this index, then die...
+                    if (ctx->done && ctx->done->p == p) goto die;
+
+                    // Remove ourselves from the running list...
+                    if (prev) { prev->next = t->next; } else { run_list = t->next; prev = NULL; }
+
+                    // Free the previous candidate if there was one...
+                    if (ctx->done) task_release(ctx, ctx->done);
+
+                    // Mark us as the candidate...
+                    t->next = NULL;
+                    t->p = p;
+                    ctx->done = t;
+
+                    // If we are all lazy, the first to finish is the one!
+                    if (!(ctx->flags & IF_NOT_LAZY)) goto done; 
+
+                    // And move on to the next task...
+                    if (prev) { t = prev->next; } else { t = run_list; }
+                    continue;
 
                 case OP_CONCAT:
                     if (t->last == n->a) goto leg_b;
@@ -754,27 +796,29 @@ int re_match(struct rectx *ctx, char *p, int len) {
                 // here iterating... originally we used a separate variable, but a stack
                 // item should be fine.
                 case OP_MATCHGRP:
-                    fprintf(stderr, "MATCHGRP\n");
                     if (t->last == n->parent) {
-                        // TODO: can we match an empty group? Do we need to worry
-                        // about ghost matches in this case?
-                        fprintf(stderr, "H2 g1len %d\n", t->grp[n->mgrp].len);
-                        if (t->grp[n->mgrp].len == 0) goto parent;
+                        // A zero length group match is a ghost match...
+                        if (t->grp[n->mgrp].len == 0) {
+                            if (t->lastghostmatch == n) goto die;
+                            t->lastghostmatch = n;
+                            goto parent;
+                        }
+                        // We will use a stack entry for tracking position...
                         if (t->sp == 0) {
                             fprintf(stderr, "STACK OVERFLOW, MATCHGRP\n");
                             goto die;
                         }
                         t->sp--;
                         t->stack[t->sp] = 0;
-                        fprintf(stderr, "Setup for match group\n");
+                        t->lastghostmatch = NULL;
                     }
-                    // TODO: can we tidy this?
-                    t->last = n;
-                    fprintf(stderr, "Comparing ch=%c with grp %c\n", ch, t->grp[n->mgrp].ptr[t->stack[t->sp]]);
                     if (ch == t->grp[n->mgrp].ptr[t->stack[t->sp]]) {
-                        // we're ok, stay unless we are done...
+                        t->last = n;
                         t->stack[t->sp]++;
-                        if (t->stack[t->sp] == t->grp[n->mgrp].len) { t->sp++; t->n = n->parent; }
+                        if (t->stack[t->sp] == t->grp[n->mgrp].len) { 
+                            t->sp++; 
+                            t->n = n->parent; 
+                        }
                         goto next;
                     }
                     goto die;
@@ -820,9 +864,29 @@ die:                if (prev) {
     // Ok, we get here because we've run out of text or we've run out of tasks
     // or both.
 done:
+
+    //
+    // If all lazy, then it's the first one to finish.
+    //
+    // If something is not lazy, then it will be the first one to finish
+    // on the last index that is used.
+    //
+    // So if DONE is reached on a new index then the done list can be freed since
+    // we won't care about the old ones. Anything finishing after the first one
+    // can also be killed.
+    //
+    // So actually we just care about resetting done, and storing the first one
+    // to finish. But we can't reset before as we might need it.
+    // So need two states, or store the index into the done task somehow.
+    //
+    //
+
+
+    fprintf(stderr, "DONE -- running through done tasks.\n");
+    t = ctx->done;
     if (t) {
         // If t is set, then that's the one that finished first
-        fprintf(stderr, "task=%p node=%p nid=%d *p=%d\n", t, t->n, NODE_ID(ctx, t->n), *p);
+        fprintf(stderr, "----- task=%p node=%p nid=%d *p=%d (index=%d)\n", t, t->n, NODE_ID(ctx, t->n), *p, (int)(t->p - start));
         // Output the groups....
         for (int i=0; i < ctx->groups; i++) {
             char * p = t->grp[i].ptr;
@@ -833,16 +897,17 @@ done:
                 fprintf(stderr, "GRP %d: no match\n", i);
             }
         }
+        fprintf(stderr, "\n");
+        task_release(ctx, ctx->done);
     } else {
-        fprintf(stderr, "match failed\n");
+        fprintf(stderr, "no match\n");
     }
-
-
 
     // Ok, now we need to free up all the tasks, they will either be in the run list
     // or the free list
     while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
     while (run_list) { struct task *x = run_list->next; free(run_list); run_list = x; }
+
 }
 
 
@@ -969,15 +1034,15 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abcd", 0);
 
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
-    struct rectx *ctx = re_compile("ab(..)xx(\\1+)abc", 0);
+    struct rectx *ctx = re_compile("(a+)a", 0);
  
  fprintf(stderr, "here\n");
     export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "abcdxxcdcdcdcdabc", 0);
+    int x = re_match(ctx, "helloaaaaaabcdef", 0);
 
 
- //   re_free(ctx);
+    re_free(ctx);
 //    struct set *s = build_set("[a-zA-Z0-9]");
 //    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
 
