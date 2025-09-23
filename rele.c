@@ -23,10 +23,11 @@
 // Internal flags ... created by compile stage
 #define IF_NOT_LAZY (1 << 15)
 
-// A type used for matching groups...
+// A type used for matching groups... we use ptr/len during processing
+// but switch to rm_so and rm_eo at the end.
 struct re_match_t {
-    char        *ptr;
-    uint32_t    len;
+    int32_t     rm_so;
+    int32_t     rm_eo;
 };
 
 
@@ -140,7 +141,6 @@ static struct node *create_node_here(struct rectx *ctx, struct node *last, uint8
     } else {
         // We need a concat...
         n->parent = create_node_above(ctx, last, OP_CONCAT, last, n);
-        fprintf(stderr, "concat needed above %d, concat id is %d\n", NODE_ID(ctx, last), NODE_ID(ctx, n->parent));
     }
     return n;
 }
@@ -525,11 +525,6 @@ fail:
     return NULL;
 }
 
-// Freeing the context is much simpler now since everything was allocated
-// in a block, so no need to walk the tree anymore.
-void re_free(struct rectx *ctx) {
-    free(ctx);
-}
 
 // -------------------------------------------------------------------------------
 // Simple matching with escapes and classes
@@ -574,7 +569,6 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
     struct task *task = ctx->free_list;
 
     if (task) {
-        fprintf(stderr, "reusing task\n");
         ctx->free_list = task->next;
     } else {
         // Allocate a task with enough space for gorup matching...
@@ -583,7 +577,7 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
         memset((void *)task, 0, sizeof(struct task));
 
         tcount++;
-        fprintf(stderr, "max task count is %d\n", tcount);
+//        fprintf(stderr, "max task count is %d\n", tcount);
     }
 
     if (from) {
@@ -593,8 +587,10 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
         task->sp = from->sp;
         task->lastghostmatch = from->lastghostmatch;
     } else {
-        // Make sure matches are zero to start...
-        memset(task->grp, 0, sizeof(struct re_match_t) * ctx->groups);
+        // Make sure matches are -1 to staret with...
+        for (int i=0; i < ctx->groups; i++) {
+            task->grp[i].rm_so = task->grp[i].rm_eo = (int32_t)-1;
+        }
         task->sp = TASK_STACK_SIZE;
         task->lastghostmatch = NULL;
     }
@@ -609,6 +605,14 @@ void task_release(struct rectx *ctx, struct task *task) {
     ctx->free_list = task;
 }
 
+// Freeing the context is much simpler now since everything was allocated
+// in a block, also the tasks are freed after the match, so we only need
+// to worry about the successful one.
+void re_free(struct rectx *ctx) {
+    if (ctx->done) free(ctx->done);
+    free(ctx);
+}
+
 
 int re_match(struct rectx *ctx, char *p, int len) {
     // Create the first task on the list...
@@ -620,7 +624,7 @@ int re_match(struct rectx *ctx, char *p, int len) {
     struct task *t;
     struct set *set;
     char *start = p;
-    char *end = p + (len ? len : strlen(p));
+    char *end = p + (len ? len : strlen(p));        // TODO: remove and use len or zero check?
     int rc = 0;
 
     do {
@@ -646,7 +650,6 @@ int re_match(struct rectx *ctx, char *p, int len) {
                 // If our regex is ALL lazy, then the first completed is the answer!
                 //
                 case OP_DONE:
-                    fprintf(stderr, "DONE for %p\n", t);
                     // If we have already completed at this index, then die...
                     if (ctx->done && ctx->done->p == p) goto die;
 
@@ -705,7 +708,9 @@ int re_match(struct rectx *ctx, char *p, int len) {
                     goto die;
 
                 case OP_END:
-                    if (*p == 0) goto parent;
+                    if (p == end) goto parent;
+//                    if (len && ((int)(p - start) == len)) goto parent;
+//                    if (!len && *p == 0) goto parent;
                     goto die;
 
                 // If we come from above then get a new stack position and init, otherwise
@@ -754,18 +759,19 @@ int re_match(struct rectx *ctx, char *p, int len) {
                         t->lastghostmatch = n;
                         t->n = n->parent;
                         t->last = n;
-                        t->grp[n->group].ptr = p;
-                        t->grp[n->group].len = 0;
+                        t->grp[n->group].rm_so = t->grp[n->group].rm_eo = (int32_t)(p - start);
                         continue;
                     }
                     if (t->last == n->b) {
                         // On the way back up... fill in the length
                         t->n = n->parent;
-                        if (n->group != NO_GROUP) { t->grp[n->group].len = (uint32_t)(p - t->grp[n->group].ptr); }
+                        if (n->group != NO_GROUP) { t->grp[n->group].rm_eo = (int32_t)(p - start); }
+                        fprintf(stderr, "FILLING GROUP %d with %d\n", n->group, (int32_t)(p - start));
+                        fprintf(stderr, "GROUP 2 is %d\n", t->grp[2].rm_eo);
                     } else {
                         // Going down leg b... mark the start
                         t->n = n->b;
-                        if (n->group != NO_GROUP) { t->grp[n->group].ptr = p; }
+                        if (n->group != NO_GROUP) { t->grp[n->group].rm_so = (int32_t)(p - start); }
                     }
                     t->last = n;
                     continue;
@@ -773,7 +779,6 @@ int re_match(struct rectx *ctx, char *p, int len) {
                 // If we match we just go back up but let the next task run. If we
                 // fail then we die.
                 case OP_MATCH:
-                    fprintf(stderr, "pos=%d task=%p nid=%d\n", (int)(p-start), t, NODE_ID(ctx, n));
                     if (ch && matchone(n->ch, ch)) {
                         t->last = n;
                         t->n = n->parent;
@@ -798,7 +803,7 @@ int re_match(struct rectx *ctx, char *p, int len) {
                 case OP_MATCHGRP:
                     if (t->last == n->parent) {
                         // A zero length group match is a ghost match...
-                        if (t->grp[n->mgrp].len == 0) {
+                        if (t->grp[n->mgrp].rm_so == t->grp[n->mgrp].rm_eo) {
                             if (t->lastghostmatch == n) goto die;
                             t->lastghostmatch = n;
                             goto parent;
@@ -809,13 +814,13 @@ int re_match(struct rectx *ctx, char *p, int len) {
                             goto die;
                         }
                         t->sp--;
-                        t->stack[t->sp] = 0;
+                        t->stack[t->sp] = t->grp[n->mgrp].rm_so;
                         t->lastghostmatch = NULL;
                     }
-                    if (ch == t->grp[n->mgrp].ptr[t->stack[t->sp]]) {
+                    if (ch == start[t->stack[t->sp]]) {
                         t->last = n;
                         t->stack[t->sp]++;
-                        if (t->stack[t->sp] == t->grp[n->mgrp].len) { 
+                        if (t->stack[t->sp] == t->grp[n->mgrp].rm_eo) { 
                             t->sp++; 
                             t->n = n->parent; 
                         }
@@ -889,18 +894,16 @@ done:
         fprintf(stderr, "----- task=%p node=%p nid=%d *p=%d (index=%d)\n", t, t->n, NODE_ID(ctx, t->n), *p, (int)(t->p - start));
         // Output the groups....
         for (int i=0; i < ctx->groups; i++) {
-            char * p = t->grp[i].ptr;
-            int len = t->grp[i].len;
-            if (p) {
-                fprintf(stderr, "GRP %d: [%.*s] (len=%d offset=%d)\n", i, len, t->grp[i].ptr, len, (int)(p-start));
-            } else {
-                fprintf(stderr, "GRP %d: no match\n", i);
-            }
+            fprintf(stderr, "GRP %d: (so=%d eo=%d)\n", i, t->grp[i].rm_so, t->grp[i].rm_eo);
+//                fprintf(stderr, "GRP %d: [%.*s] (len=%d offset=%d)\n", i, len, t->grp[i].ptr, len, (int)(p-start));
+//                t->grp[i].rm_so = (int)(p - start);
+//                t->grp[i].rm_eo = t->grp[i].rm_so + len; 
         }
+
+        
         fprintf(stderr, "\n");
-        task_release(ctx, ctx->done);
-    } else {
-        fprintf(stderr, "no match\n");
+//    } else {
+//        fprintf(stderr, "no match\n");
     }
 
     // Ok, now we need to free up all the tasks, they will either be in the run list
@@ -1034,18 +1037,96 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abcd", 0);
 
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
-    struct rectx *ctx = re_compile("(a+)a", 0);
+    struct rectx *ctx = re_compile("abc", 0);
  
  fprintf(stderr, "here\n");
     export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "helloaaaaaabcdef", 0);
+    int x = re_match(ctx, "abcd", 0);
 
 
     re_free(ctx);
+    exit(0);
 //    struct set *s = build_set("[a-zA-Z0-9]");
 //    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
 
+
+    char    line[1024]; 
+    int     no = 0;
+    int     len;
+    int     mode = 0;
+
+    FILE    *tf = fopen("regex_test_cases.txt", "r");
+    if (!tf) {
+        fprintf(stderr, "Unable to open file\n");
+        exit(1);
+    }
+    while((fgets(line, sizeof(line)-1, tf))) {
+        no++;
+        len = strlen(line);
+        line[len-1] = '\0';
+        fprintf(stderr, "GOT [%s]\n", line);
+
+        // Skip comments...
+        if (line[0] == '#') continue;
+
+        switch(mode) {
+            case 0:         // read the regex
+                if (!line[0]) continue;         // ignore any blank lines
+                if (line[0] != '/') {
+                    fprintf(stderr, "Expected regex on line %d\n", no);
+                    exit(1);
+                }
+                fprintf(stderr, "GOT regex: [%s]\n", &line[1]);
+
+                ctx = re_compile(&line[1], 0);
+                if (!ctx) {
+                    fprintf(stderr, "REGEX COMPILE FAIL\n");
+                    exit(1);
+                }
+                mode++;
+                continue;
+
+            case 1:         // read the plain text
+                if (!line[0]) {
+                    fprintf(stderr, "Expected plain text on line %d\n", no);
+                    exit(1);
+                }
+                fprintf(stderr, "GOT plain text [%s]\n", line);
+
+                x = re_match(ctx, line, 0);
+
+
+                mode++;
+                continue;
+
+            case 2:         // results
+                if (!line[0]) {
+                    // Results end ... need to ensure we haven't missed any!
+                    mode = 0;
+                    re_free(ctx);
+                    continue;
+                }
+                {
+                    int item, start, end;
+                    int rc = sscanf(line, "%d: %d,%d", &item, &start, &end);
+                    if (rc != 3) {
+                        fprintf(stderr, "Unable to parse results line: rc=%d\n", rc);
+                    }   
+                    fprintf(stderr, "Expect result %d to be %d -> %d\n", item, start, end);
+
+                    int rs, re;
+                    rs = ctx->done->grp[item].rm_so;
+                    re = ctx->done->grp[item].rm_eo;
+                    fprintf(stderr, "Got    result %d to be %d -> %d\n", item, rs, re);
+                }
+                fprintf(stderr, "Result: %s\n", line);
+                continue;
+        }
+
+
+    }
+    fclose(tf);
 
 }
 

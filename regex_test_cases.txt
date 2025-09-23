@@ -1,0 +1,27 @@
+# Test file for testing regular expressions, we keep things to lines
+# so that we don't need to worry about quotes and delimeters
+#
+# The format is:
+#
+#       /<regex>
+#       <string>
+#       <g0 match>          -- 0: 1,9          (start to end)
+#       <g1 match>          -- 1: 4,5          (start to end)
+#       <blank>             -- for no more matches
+#
+/abc
+hereabcthere
+0: 4,7
+
+/(abc)
+hereabcthere
+0: 4,7
+1: 4,7
+
+/(.*)(abc)(.*)
+hereabcthere
+0: 0,12
+1: 0,4
+2: 4,7
+3: 7,12
+
