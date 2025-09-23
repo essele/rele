@@ -749,6 +749,35 @@ int re_match(struct rectx *ctx, char *p, int len) {
                         goto next;
                     }
                     goto die;
+
+                // Match a previous group, coming from the top we initialise then stay
+                // here iterating... originally we used a separate variable, but a stack
+                // item should be fine.
+                case OP_MATCHGRP:
+                    fprintf(stderr, "MATCHGRP\n");
+                    if (t->last == n->parent) {
+                        // TODO: can we match an empty group? Do we need to worry
+                        // about ghost matches in this case?
+                        fprintf(stderr, "H2 g1len %d\n", t->grp[n->mgrp].len);
+                        if (t->grp[n->mgrp].len == 0) goto parent;
+                        if (t->sp == 0) {
+                            fprintf(stderr, "STACK OVERFLOW, MATCHGRP\n");
+                            goto die;
+                        }
+                        t->sp--;
+                        t->stack[t->sp] = 0;
+                        fprintf(stderr, "Setup for match group\n");
+                    }
+                    // TODO: can we tidy this?
+                    t->last = n;
+                    fprintf(stderr, "Comparing ch=%c with grp %c\n", ch, t->grp[n->mgrp].ptr[t->stack[t->sp]]);
+                    if (ch == t->grp[n->mgrp].ptr[t->stack[t->sp]]) {
+                        // we're ok, stay unless we are done...
+                        t->stack[t->sp]++;
+                        if (t->stack[t->sp] == t->grp[n->mgrp].len) { t->sp++; t->n = n->parent; }
+                        goto next;
+                    }
+                    goto die;
                 
                 default:
                     fprintf(stderr, "unknown node op=%d (id=%d)\n", n->op, NODE_ID(ctx, n));
@@ -940,12 +969,12 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abcd", 0);
 
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
-    struct rectx *ctx = re_compile("def(()+)+", 0);
+    struct rectx *ctx = re_compile("ab(..)xx(\\1+)abc", 0);
  
  fprintf(stderr, "here\n");
     export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "def", 0);
+    int x = re_match(ctx, "abcdxxcdcdcdcdabc", 0);
 
 
  //   re_free(ctx);
