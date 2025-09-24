@@ -19,6 +19,9 @@
 // Compile flags...
 #define F_CASELESS  (1 << 0)
 
+// Match flags...
+#define F_KEEP_TASKS    (1 << 16)
+
 
 // Internal flags ... created by compile stage
 #define IF_NOT_LAZY (1 << 15)
@@ -48,23 +51,23 @@ enum {
 
 struct node {
     union {
-       struct node      *a;         // the first child
+       struct node      *a;             // the first child
        struct {
             uint16_t    min;
             uint16_t    max;
         };
-       uint8_t          group;      // for creating groups
+       uint8_t          group;          // for creating groups
     };
     union {
-        struct node     *b;         // the second child
-        struct set      *set;       // a possible set match
-        uint8_t         mgrp;       // a possible group match
-        char            ch[2];      // can store matched char
+        struct node     *b;             // the second child
+        struct set      *set;           // a possible set match
+        uint8_t         mgrp;           // a possible group match
+        char            ch[2];          // can store matched char
     };
     struct node         *parent;        // for a way back
     uint8_t             op;             // which operation?
     uint8_t             lazy;           // won't fit in a with minmax
-    // Two bytes unused here...
+    // Two bytes unused here (if 32bit)
 };
 
 
@@ -152,8 +155,8 @@ static struct node *create_node_here(struct rectx *ctx, struct node *last, uint8
 #define TASK_STACK_SIZE      3
 
 struct task {
-    struct task         *next;          // tasks are singly linked
-    struct node         *n;             // current node
+    struct task             *next;          // tasks are singly linked
+    struct node             *n;             // current node
     union {
         struct node         *last;          // last one we processed (for direction)
         char                *p;             // pointer to the DONE index
@@ -172,7 +175,7 @@ struct task {
     struct re_match_t   grp[];
 };
 
-static int tcount = 0;      // TODO: might want to remove
+static int tcount = 0;      // TODO: might want to remove and use #defined debug code
 
 // -------------------------------------------------------------------------------
 // SETS (of characters or ranges etc)
@@ -251,7 +254,6 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
     return p;
 
 fail:
-    free(set);
     return NULL;
 }
 
@@ -275,10 +277,6 @@ char *dummy_set(char *p) {
     return p;
 }
 
-static void set_free(struct set *set) {
-    free(set);
-}
-
 int match_set(char ch, struct set *set) {
     int word = ch/32;
 
@@ -287,7 +285,6 @@ int match_set(char ch, struct set *set) {
     }
     return 0;
 }
-
 
 // Process a min/max spec and update the supplied node accordingly
 char *minmax(char *p, struct node *n) {
@@ -370,7 +367,7 @@ struct rectx *alloc_ctx(char *regex) {
         switch (*p) {
             case OP_MULT:
                 p = minmax(p, NULL);
-                if (!p) return NULL;
+                if (!p) return NULL;        // min max error
                 // drop through...
 
             // These are always a node...
@@ -391,6 +388,7 @@ struct rectx *alloc_ctx(char *regex) {
 
             case OP_MATCHSET:
                 p = dummy_set(p);
+                if (!p) return NULL;        // set error (not impl)
                 sets++;
                 // drop through
 
@@ -547,7 +545,7 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
     return ctx;
 
 fail:
-    // todo -- destroy everything
+    free(ctx);
     return NULL;
 }
 
@@ -630,12 +628,23 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
 void task_release(struct rectx *ctx, struct task *task) {
     task->next = ctx->free_list;
     ctx->free_list = task;
+
+    int size = 0;
+    struct task *t = ctx->free_list;
+    while (t) {
+        size++;
+        t = t->next;
+    }
 }
 
 // Freeing the context is much simpler now since everything was allocated
 // in a block, also the tasks are freed after the match, so we only need
 // to worry about the successful one.
 void re_free(struct rectx *ctx) {
+    // If we have kept our tasks then they will still be in the free list...
+    while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
+
+    // Free the result task if there is one...
     if (ctx->done) free(ctx->done);
     free(ctx);
 }
@@ -658,7 +667,12 @@ static inline int has_same_stack(struct rectx *ctx, struct task *a, struct task 
 }
 
 
-int re_match(struct rectx *ctx, char *p, int len) {
+int re_match(struct rectx *ctx, char *p, int len, int flags) {
+    tcount = 0;
+
+    // If we have a result left over from a prior run, free it.
+    if (ctx->done) { task_release(ctx, ctx->done); ctx->done = NULL; }
+
     // Create the first task on the list...
     struct task *run_list = task_new(ctx, NULL, NULL, NULL, ctx->root);
 
@@ -923,45 +937,16 @@ die:                if (prev) {
 
     // Ok, we get here because we've run out of text or we've run out of tasks
     // or both.
+
 done:
 
-    //
-    // If all lazy, then it's the first one to finish.
-    //
-    // If something is not lazy, then it will be the first one to finish
-    // on the last index that is used.
-    //
-    // So if DONE is reached on a new index then the done list can be freed since
-    // we won't care about the old ones. Anything finishing after the first one
-    // can also be killed.
-    //
-    // So actually we just care about resetting done, and storing the first one
-    // to finish. But we can't reset before as we might need it.
-    // So need two states, or store the index into the done task somehow.
-    //
-    //
+    // Move any tasks left on the run-list into the free list
+    while (run_list) { struct task *x = run_list->next; task_release(ctx, run_list); run_list = x; }
 
-
-//    fprintf(stderr, "DONE -- running through done tasks.\n");
-    t = ctx->done;
-    if (t) {
-        // If t is set, then that's the one that finished first
-//        fprintf(stderr, "----- task=%p node=%p nid=%d *p=%d (index=%d)\n", t, t->n, NODE_ID(ctx, t->n), *p, (int)(t->p - start));
-        // Output the groups....
-        for (int i=0; i < ctx->groups; i++) {
-//            fprintf(stderr, "GRP %d: (so=%d eo=%d)\n", i, t->grp[i].rm_so, t->grp[i].rm_eo);
-        }
-
-        
-//        fprintf(stderr, "\n");
-//    } else {
-//        fprintf(stderr, "no match\n");
+    if (!(flags & F_KEEP_TASKS)) {
+        while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
     }
-
-    // Ok, now we need to free up all the tasks, they will either be in the run list
-    // or the free list
-    while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
-    while (run_list) { struct task *x = run_list->next; free(run_list); run_list = x; }
+//    while (run_list) { struct task *x = run_list->next; free(run_list); run_list = x; }
 
 }
 
@@ -1099,7 +1084,12 @@ int main(int argc, char *argv[]) {
     
     export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "xyabcyx", 0);
+    int x;
+    for (int i=0; i < 1000; i++) {
+        x = re_match(ctx, "xyabcyx", 0, F_KEEP_TASKS);
+        x = re_match(ctx, "xyabcyx", 0, F_KEEP_TASKS);
+        x = re_match(ctx, "xyabcyx", 0, F_KEEP_TASKS);
+    }
     if (!ctx->done) {
         fprintf(stderr, "no match\n");
         exit(1);
@@ -1159,9 +1149,7 @@ int main(int argc, char *argv[]) {
                 }
                 fprintf(stderr, "GOT plain text [%s]\n", line);
 
-                x = re_match(ctx, line, 0);
-
-
+                x = re_match(ctx, line, 0, F_KEEP_TASKS);
                 mode++;
                 continue;
 
