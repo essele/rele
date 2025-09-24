@@ -369,17 +369,17 @@ struct rectx *alloc_ctx(char *regex) {
         p++;
     }
 
-    fprintf(stderr, "We have %d matches and %d nodes\n", matches, nodes);
+//    fprintf(stderr, "We have %d matches and %d nodes\n", matches, nodes);
     
     // We need one less splitter than matches
     int splits = matches - 1;
 
-    fprintf(stderr, "splits = %d\n", splits);
+//    fprintf(stderr, "splits = %d\n", splits);
 
     // We also need space for our extra added nodes
     nodes += matches + splits + 6;
 
-    fprintf(stderr, "We have %d nodes and %d sets\n", nodes, sets);
+//    fprintf(stderr, "We have %d nodes and %d sets\n", nodes, sets);
 
     struct rectx *ctx = malloc(sizeof(struct rectx) +
                                 (nodes * sizeof(struct node)) + 
@@ -393,7 +393,7 @@ struct rectx *alloc_ctx(char *regex) {
     ctx->nodes = (struct node *)((void *)ctx + sizeof(struct rectx));
     ctx->sets = (struct set *)((void *)ctx + (sizeof(struct rectx) + (nodes * sizeof(struct node))));
 
-    fprintf(stderr, "CTX: %p\nNODES: %p\nSETS: %p\n", ctx, ctx->nodes, ctx->sets);
+//    fprintf(stderr, "CTX: %p\nNODES: %p\nSETS: %p\n", ctx, ctx->nodes, ctx->sets);
     return ctx;
 }
 
@@ -449,7 +449,7 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 } else {
                     last->group = ctx->groups++;
                 }
-                fprintf(stderr, "Created group %d node id is %d (parent id=%d)\n", last->group, NODE_ID(ctx, last), NODE_ID(ctx, last->parent));
+//                fprintf(stderr, "Created group %d node id is %d (parent id=%d)\n", last->group, NODE_ID(ctx, last), NODE_ID(ctx, last->parent));
                 break;
 
             case ')':       // closing a group
@@ -577,7 +577,7 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
         memset((void *)task, 0, sizeof(struct task));
 
         tcount++;
-//        fprintf(stderr, "max task count is %d\n", tcount);
+        fprintf(stderr, "max task count is %d\n", tcount);
     }
 
     if (from) {
@@ -613,6 +613,23 @@ void re_free(struct rectx *ctx) {
     free(ctx);
 }
 
+// TODO: might be quicker using a memcpy(a->grp, b->grp, ctx->groups * sizeof(struct xxx))
+static inline int has_same_groups(struct rectx *ctx, struct task *a, struct task *b) {
+    for (int i=0; i < ctx->groups; i++) {
+        if (a->grp[i].rm_so != b->grp[i].rm_so) return 0;
+        if (a->grp[i].rm_eo != b->grp[i].rm_eo) return 0;
+    }
+    return 1;
+}
+
+static inline int has_same_stack(struct rectx *ctx, struct task *a, struct task *b) {
+    if (a->sp != b->sp) return 0;
+    for (int i=a->sp; i < TASK_STACK_SIZE; i++) {
+        if (a->stack[i] != b->stack[i]) return 0;
+    }
+    return 1;
+}
+
 
 int re_match(struct rectx *ctx, char *p, int len) {
     // Create the first task on the list...
@@ -641,6 +658,23 @@ int re_match(struct rectx *ctx, char *p, int len) {
         // for next time.
         while (t) {
             struct node *n = t->n;
+
+            // Task Deduplication ... if we are about to match something, then look at
+            // all the tasks that went before us and see if any did the same match and
+            // then, if the state is all the same, we can die.
+            if (1) {
+            if (n->op == OP_MATCH || n->op == OP_MATCHGRP || n->op == OP_MATCHSET) {
+                struct task *x = run_list;
+                while (x != t) {
+                    if (x->last == n) {
+                        // This task (x) has just done this match node...
+                        if (has_same_groups(ctx, x, t) && has_same_stack(ctx, x, t)) goto die;
+                    }
+                    x = x->next;
+                }
+
+            }
+            }
 
             switch(n->op) {
                 // If we get to OP_DONE then we are done, but there might be other
@@ -764,13 +798,13 @@ int re_match(struct rectx *ctx, char *p, int len) {
                     }
                     if (t->last == n->b) {
                         // On the way back up... fill in the length
+                        // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
                         t->n = n->parent;
                         if (n->group != NO_GROUP) { t->grp[n->group].rm_eo = (int32_t)(p - start); }
-                        fprintf(stderr, "FILLING GROUP %d with %d\n", n->group, (int32_t)(p - start));
-                        fprintf(stderr, "GROUP 2 is %d\n", t->grp[2].rm_eo);
                     } else {
                         // Going down leg b... mark the start
                         t->n = n->b;
+                        // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
                         if (n->group != NO_GROUP) { t->grp[n->group].rm_so = (int32_t)(p - start); }
                     }
                     t->last = n;
@@ -887,21 +921,18 @@ done:
     //
 
 
-    fprintf(stderr, "DONE -- running through done tasks.\n");
+//    fprintf(stderr, "DONE -- running through done tasks.\n");
     t = ctx->done;
     if (t) {
         // If t is set, then that's the one that finished first
-        fprintf(stderr, "----- task=%p node=%p nid=%d *p=%d (index=%d)\n", t, t->n, NODE_ID(ctx, t->n), *p, (int)(t->p - start));
+//        fprintf(stderr, "----- task=%p node=%p nid=%d *p=%d (index=%d)\n", t, t->n, NODE_ID(ctx, t->n), *p, (int)(t->p - start));
         // Output the groups....
         for (int i=0; i < ctx->groups; i++) {
-            fprintf(stderr, "GRP %d: (so=%d eo=%d)\n", i, t->grp[i].rm_so, t->grp[i].rm_eo);
-//                fprintf(stderr, "GRP %d: [%.*s] (len=%d offset=%d)\n", i, len, t->grp[i].ptr, len, (int)(p-start));
-//                t->grp[i].rm_so = (int)(p - start);
-//                t->grp[i].rm_eo = t->grp[i].rm_so + len; 
+//            fprintf(stderr, "GRP %d: (so=%d eo=%d)\n", i, t->grp[i].rm_so, t->grp[i].rm_eo);
         }
 
         
-        fprintf(stderr, "\n");
+//        fprintf(stderr, "\n");
 //    } else {
 //        fprintf(stderr, "no match\n");
     }
@@ -1037,24 +1068,33 @@ int main(int argc, char *argv[]) {
 //    struct rectx *ctx = re_compile("abcd", 0);
 
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
-    struct rectx *ctx = re_compile("abc", 0);
- 
- fprintf(stderr, "here\n");
+
+//    struct rectx *ctx = re_compile("^(a(bc))*d", 0);
+    struct rectx *ctx = re_compile("(.|.|.).*abc", 0);
+    
     export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "abcd", 0);
-
-
+    int x = re_match(ctx, "xxasdfasdfasdasdfabcbcd", 0);
+    if (!ctx->done) {
+        fprintf(stderr, "no match\n");
+        exit(1);
+    }
+    for (int i=0; i < ctx->groups; i++) {
+        fprintf(stderr, "%d: %d -> %d\n", i, ctx->done->grp[i].rm_so, ctx->done->grp[i].rm_eo);
+    }
     re_free(ctx);
-    exit(0);
-//    struct set *s = build_set("[a-zA-Z0-9]");
+//    exit(0);
+
+    //    struct set *s = build_set("[a-zA-Z0-9]");
 //    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
 
 
+   // struct rectx *ctx;
     char    line[1024]; 
     int     no = 0;
     int     len;
     int     mode = 0;
+    //int x;
 
     FILE    *tf = fopen("regex_test_cases.txt", "r");
     if (!tf) {
