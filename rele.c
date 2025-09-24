@@ -206,6 +206,7 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
     p++;            // get past the '['
     if (*p == '^') { negate = 1; p++; }
     while (1) {
+        if (!*p) goto fail;
         if (*p == ']') break;           // done
         if (p[1] == '-' && p[2] && p[2] != ']') {
             if (p[0] > p[2]) goto fail;
@@ -231,8 +232,11 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
                     default:    SET_VAL(*p); break;
                 }
             } else {
-                // TODO: case!
-                SET_VAL(*p);
+                if (ctx->flags & F_CASELESS) {
+                    SET_CASELESS_VAL(*p);
+                } else {
+                    SET_VAL(*p);
+                }
             }
             p++;
         }
@@ -294,14 +298,14 @@ char *minmax(char *p, struct node *n) {
     if (!isdigit((int)*p)) return NULL;
 
     // Now work out the first number...
-    while (isdigit((int)*p)) min = (min * 10) + (*p++ - '0');
+    while (isdigit((int)*p)) { min = (min * 10) + (*p++ - '0'); if (min > 1000) return NULL; }
 
     if (*p == '}') { max = min; goto done; }        // An exact number
     if (*p++ != ',') return NULL;                   // Need a comma
     if (*p == '}') { max = NO_MAX; goto done; }     // No second number
 
     // Now get the second number...
-    while (isdigit((int)*p)) max = (max * 10) + (*p++ - '0');
+    while (isdigit((int)*p)) { max = (max * 10) + (*p++ - '0'); if (max > 1000) return NULL; }
 
     // Now must be a close bracket and right order...
     if (*p != '}' || max < min) return NULL;
@@ -313,6 +317,40 @@ done:
     }
     return p;
 }
+
+// Check if a string could be a group identifier, these can be...
+// \1, \10, \21, \200, \{12}, \g1, \g12, \g{15}
+// We assume we have been called with p just after the backslash...
+// We just process the number here, we don't check if the group is
+// too high.
+int is_group(char *p, uint8_t *gid, char **newp, char **errp) {
+    int group = 0;
+    int bracket = 0;
+
+    if (*p == 'g') p++;
+    if (*p == '{') { p++; bracket = 1; }
+    if (*p == '0') goto error;      // cant have zero, or leading zeros
+    while (*p >= '0' && *p <= '9') {
+        group = (group * 10) + (int)(*p - '0');
+        if (group > 255) goto error;
+        p++;
+    }
+    if (group == 0) return 0;       // not a group!
+    if (bracket) {
+        if (*p != '}' || group == 0) goto error;
+        p++;
+    }
+    // Was a group...
+    if (gid) *gid = (uint8_t)group;
+    if (newp) *newp = p-1;              // need to point at the last char of it.
+    return 1;
+
+error:
+    if (newp) *newp = NULL;
+    if (errp) *errp = p;
+    return 1;
+}
+
 
 // ------------------------------------------------------------------------
 // Dummy (and hopefully fast) version of the compiler that is purely used
@@ -332,6 +370,7 @@ struct rectx *alloc_ctx(char *regex) {
         switch (*p) {
             case OP_MULT:
                 p = minmax(p, NULL);
+                if (!p) return NULL;
                 // drop through...
 
             // These are always a node...
@@ -361,25 +400,19 @@ struct rectx *alloc_ctx(char *regex) {
                 break;
 
             default:
-            // TODO: cater for proper group terminology
-                if (*p == '\\') p++;
                 matches++;
-                break;
+                if (*p == '\\' && is_group(p+1, NULL, &p, NULL)) {
+                    // Check for group syntax/scale issues...
+                    if (!p) return NULL;
+                } else if (*p == '\\') p++;
         }
         p++;
     }
 
-//    fprintf(stderr, "We have %d matches and %d nodes\n", matches, nodes);
-    
     // We need one less splitter than matches
     int splits = matches - 1;
-
-//    fprintf(stderr, "splits = %d\n", splits);
-
     // We also need space for our extra added nodes
     nodes += matches + splits + 6;
-
-//    fprintf(stderr, "We have %d nodes and %d sets\n", nodes, sets);
 
     struct rectx *ctx = malloc(sizeof(struct rectx) +
                                 (nodes * sizeof(struct node)) + 
@@ -392,8 +425,6 @@ struct rectx *alloc_ctx(char *regex) {
 
     ctx->nodes = (struct node *)((void *)ctx + sizeof(struct rectx));
     ctx->sets = (struct set *)((void *)ctx + (sizeof(struct rectx) + (nodes * sizeof(struct node))));
-
-//    fprintf(stderr, "CTX: %p\nNODES: %p\nSETS: %p\n", ctx, ctx->nodes, ctx->sets);
     return ctx;
 }
 
@@ -449,11 +480,9 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 } else {
                     last->group = ctx->groups++;
                 }
-//                fprintf(stderr, "Created group %d node id is %d (parent id=%d)\n", last->group, NODE_ID(ctx, last), NODE_ID(ctx, last->parent));
                 break;
 
             case ')':       // closing a group
-
                 // Logic is a little complex....
                 // We need to get back to the previous group...
                 //  If we aren't a group, then just to back to the last one.
@@ -496,20 +525,17 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 break;
 
             default:
-                if (*p == '\\' && p[1] >= '1' && p[1] <= '9') {
-                    // TODO: cater for larger numeric groups \10 \11, or \{12} or \g1 \g{4} etc.
-                    // This is a \1 type match on a group
-                    last = create_node_here(ctx, last, OP_MATCHGRP, NULL, NULL);
-                    if (!last) goto fail;
-                    last->mgrp = (uint8_t)p[1] - '0';
-                    p++;                 
+                // We are going to need a OP_MATCH or an OP_MATCHGRP
+                last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
+                if (!last) goto fail;
+                if (*p == '\\' && is_group(p+1, &(last->mgrp), &p, NULL)) {
+                    if (!p) goto fail;              // group syntax error
+                    last->op = OP_MATCHGRP;
                 } else {
-                    // Normal char, escaped, or class match...
-                    last = create_node_here(ctx, last, OP_MATCH, NULL, (struct node *)p);
                     last->ch[0] = *p;
                     if (*p == '\\') {
                         last->ch[1] = *++p;
-                        if (!*p) goto fail;         // backslash on the end!
+                        if (!*p) goto fail;         // backslash on the end
                     }
                 }
         }
@@ -529,6 +555,7 @@ fail:
 // -------------------------------------------------------------------------------
 // Simple matching with escapes and classes
 // -------------------------------------------------------------------------------
+// TODO: what if last char is a backslash, we will go over the length!
 int matchone(char *p, char ch) {
     if (*p == '.') return 1;            // always match
     if (*p == '\\') {
@@ -662,18 +689,12 @@ int re_match(struct rectx *ctx, char *p, int len) {
             // Task Deduplication ... if we are about to match something, then look at
             // all the tasks that went before us and see if any did the same match and
             // then, if the state is all the same, we can die.
-            if (1) {
             if (n->op == OP_MATCH || n->op == OP_MATCHGRP || n->op == OP_MATCHSET) {
-                struct task *x = run_list;
-                while (x != t) {
+                for (struct task *x = run_list; x != t; x = x->next) {
                     if (x->last == n) {
-                        // This task (x) has just done this match node...
                         if (has_same_groups(ctx, x, t) && has_same_stack(ctx, x, t)) goto die;
                     }
-                    x = x->next;
                 }
-
-            }
             }
 
             switch(n->op) {
@@ -1070,11 +1091,15 @@ int main(int argc, char *argv[]) {
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
 
 //    struct rectx *ctx = re_compile("^(a(bc))*d", 0);
-    struct rectx *ctx = re_compile("(.|.|.).*abc", 0);
+    struct rectx *ctx = re_compile("(.)(.)abc\\{2}\\1", 0);
+    if (!ctx) {
+        fprintf(stderr, "no compile\n");
+        exit(1);
+    }
     
     export_tree(ctx, "tree.dot");
 
-    int x = re_match(ctx, "xxasdfasdfasdasdfabcbcd", 0);
+    int x = re_match(ctx, "xyabcyx", 0);
     if (!ctx->done) {
         fprintf(stderr, "no match\n");
         exit(1);
@@ -1083,7 +1108,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "%d: %d -> %d\n", i, ctx->done->grp[i].rm_so, ctx->done->grp[i].rm_eo);
     }
     re_free(ctx);
-//    exit(0);
+    exit(0);
 
     //    struct set *s = build_set("[a-zA-Z0-9]");
 //    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
