@@ -93,10 +93,12 @@ struct rectx {
     uint8_t         groups;     // allows up to 255 groups
     uint8_t         pad;        // not used
 
+    uint32_t        pad2;
+
     // Memory for nodes and sets will follow this...
 };
 
-#define NODE_ID(ctx, n)          (int)(((void *)n - ((void *)ctx + sizeof(ctx)))/sizeof(struct node))
+#define NODE_ID(ctx, n)          (int)(((void *)n - ((void *)ctx + sizeof(struct rectx)))/sizeof(struct node))
 
 static struct node *create_node_above(struct rectx *ctx, struct node *this, uint8_t op, struct node *a, struct node *b) {
     struct node *parent = this->parent;
@@ -398,7 +400,21 @@ struct rectx *alloc_ctx(char *regex) {
                 matches++;
                 break;
 
+            
+
             default:
+                // Handle the \Q..\E case....
+                if (p[0] == '\\' && p[1] == 'Q') {
+                    p++;    // on the Q
+                    while (p[1] && !(p[1] == '\\' && p[2] == 'E')) {
+                        p++;
+                        matches++;
+                    }
+                    if (!p[1]) return NULL;       // no end to \Q..\E
+                    p += 2;
+                    break;
+                }
+
                 matches++;
                 if (*p == '\\' && is_group(p+1, NULL, &p, NULL)) {
                     // Check for group syntax/scale issues...
@@ -412,6 +428,8 @@ struct rectx *alloc_ctx(char *regex) {
     int splits = matches - 1;
     // We also need space for our extra added nodes
     nodes += matches + splits + 6;
+
+    fprintf(stderr, "Matches = %d, Splits = %d, Nodes = %d\n", matches, splits, nodes);
 
     struct rectx *ctx = malloc(sizeof(struct rectx) +
                                 (nodes * sizeof(struct node)) + 
@@ -524,6 +542,23 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 break;
 
             default:
+                // Handle the \Q..\E case....
+                if (p[0] == '\\' && p[1] == 'Q') {
+                    p++;    // on the Q
+                    while (p[1] && !(p[1] == '\\' && p[2] == 'E')) {
+                        p++;
+                        last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
+                        switch (*p) {
+                            case '.':   last->ch[0] = '\\'; last->ch[1] = '.'; break;
+                            case '\\':  last->ch[0] = '\\'; last->ch[1] = '\\'; break;
+                            default:    last->ch[0] = *p;
+                        }
+                    }
+                    if (!p[1]) goto fail;       // no end to \Q..\E
+                    p += 2;
+                    break;
+                }
+
                 // We are going to need a OP_MATCH or an OP_MATCHGRP
                 last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
                 if (!last) goto fail;
@@ -1107,7 +1142,7 @@ int main(int argc, char *argv[]) {
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
 
 //    struct rectx *ctx = re_compile("^(a(bc))*d", 0);
-    struct rectx *ctx = re_compile("abc\\Rdef", 0);
+    struct rectx *ctx = re_compile("abc\\Q***\\Edef", 0);
     if (!ctx) {
         fprintf(stderr, "no compile\n");
         exit(1);
@@ -1115,7 +1150,7 @@ int main(int argc, char *argv[]) {
     
     export_tree(ctx, "tree.dot");
  
-    int x = re_match(ctx, "abc\r\ndef", 0, F_KEEP_TASKS);
+    int x = re_match(ctx, "abc.**\\[]def", 0, F_KEEP_TASKS);
     if (!ctx->done) {
         fprintf(stderr, "no match\n");
         exit(1);
