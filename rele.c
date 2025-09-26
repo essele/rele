@@ -36,7 +36,7 @@ struct re_match_t {
 
 enum {
     OP_NOP = 0, OP_CONCAT, OP_MATCH, OP_MATCHGRP, OP_DONE,
-    OP_CRLF,
+    OP_CRLF, OP_ANCHOR,
     OP_ALTERNATE = '|',
     OP_PLUS = '+', OP_STAR = '*', OP_QUESTION = '?', OP_GROUP = '(',
     OP_BEGIN = '^', OP_END = '$', OP_MULT = '{',
@@ -400,8 +400,6 @@ struct rectx *alloc_ctx(char *regex) {
                 matches++;
                 break;
 
-            
-
             default:
                 // Handle the \Q..\E case....
                 if (p[0] == '\\' && p[1] == 'Q') {
@@ -531,7 +529,9 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
 
             case OP_BEGIN:
             case OP_END:
-                last = create_node_here(ctx, last, (uint8_t)*p, NULL, NOTUSED);
+//                last = create_node_here(ctx, last, (uint8_t)*p, NULL, NOTUSED);
+                last = create_node_here(ctx, last, OP_ANCHOR, NULL, NULL);
+                last->ch[0] = *p;
                 break;
 
             case OP_MATCHSET:
@@ -568,15 +568,20 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 } else {
                     last->ch[0] = *p;
                     if (*p == '\\') {
-                        // Handle special cases....
-                        if (p[1] == 'R') {
-                            // This is a CRLF special...
-                            last->op = OP_CRLF;
-                            p++;
-                        } else {
-                            last->ch[1] = *++p;
-                            if (!*p) goto fail;         // backslash on the end
+                        // Handle special cases and normal backslash chars...
+                        switch (p[1]) {
+                            case 'R':   last->op = OP_CRLF;
+                                        break;
+                            case 'b':   
+                            case 'B':
+                                        last->op = OP_ANCHOR;
+                                        last->ch[0] = p[1];
+                                        break;
+                            default:
+                                        last->ch[1] = p[1];
+                                        if (!p[1]) goto fail;
                         }
+                        p++;
                     }
                 }
         }
@@ -815,15 +820,31 @@ int re_match(struct rectx *ctx, char *p, int len, int flags) {
                 case OP_STAR:
                     goto new_b_or_parent;
 
-                case OP_BEGIN:
-                    if (p == start) goto parent;
-                    goto die;
+                case OP_ANCHOR:
+                    switch (n->ch[0]) {
+                        case 'b':       if (p == start) {
+                                            if (isalnum(*p)) goto parent;
+                                        } else if (p == end) {
+                                            if (isalnum(p[-1])) goto parent;
+                                        } else if (isalnum(p[-1]) ^ isalnum(p[0])) {
+                                            goto parent;
+                                        }
+                                        goto die;
+                        case 'B':       if (p == start) {
+                                            if (!isalnum(*p)) goto parent;
+                                        } else if (p == end) {
+                                            if (!isalnum(p[-1])) goto parent;
+                                        } else if (!(isalnum(p[-1]) & isalnum(p[0]))) {
+                                            goto parent;
+                                        }
+                                        goto die;
+                        case '^':       if (p == start) goto parent; 
+                                        goto die;
+                        case '$':       if (p == end) goto parent;
+                                        goto die;
+                        default:        goto die;       // shouldn't happen
 
-                case OP_END:
-                    if (p == end) goto parent;
-//                    if (len && ((int)(p - start) == len)) goto parent;
-//                    if (!len && *p == 0) goto parent;
-                    goto die;
+                    }
 
                 // If we come from above then get a new stack position and init, otherwise
                 // count until we hit min, then spawn until max...
@@ -1019,8 +1040,6 @@ done:
 char *opmap(uint8_t op) {
     switch(op) {
         case OP_MATCH:      return "MATCH";
-        case OP_BEGIN:      return "BEGIN";
-        case OP_END:        return "END";
         case OP_CONCAT:     return "CONCAT";
         case OP_PLUS:       return "PLUS";
         case OP_STAR:       return "STAR";
@@ -1033,6 +1052,7 @@ char *opmap(uint8_t op) {
         case OP_MULT:       return "MULT";
         case OP_MATCHGRP:   return "MATCHGRP";
         case OP_CRLF:       return "CRLF";
+        case OP_ANCHOR:     return "ANCHOR";
         default:            return "UNKNOWN";
     }
 }
@@ -1057,6 +1077,11 @@ void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
             } else {
                 fprintf(f, "'%c'", n->ch[0]);
             }
+            GEND;
+            return;
+
+        case OP_ANCHOR:
+            fprintf(f, "'%c'", n->ch[0]);
             GEND;
             return;
 
@@ -1142,7 +1167,7 @@ int main(int argc, char *argv[]) {
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
 
 //    struct rectx *ctx = re_compile("^(a(bc))*d", 0);
-    struct rectx *ctx = re_compile("abc\\Q***\\Edef", 0);
+    struct rectx *ctx = re_compile("^(.*)\\bhello\\b xx$", 0);
     if (!ctx) {
         fprintf(stderr, "no compile\n");
         exit(1);
@@ -1150,7 +1175,7 @@ int main(int argc, char *argv[]) {
     
     export_tree(ctx, "tree.dot");
  
-    int x = re_match(ctx, "abc.**\\[]def", 0, F_KEEP_TASKS);
+    int x = re_match(ctx, "abc hello xx", 0, F_KEEP_TASKS);
     if (!ctx->done) {
         fprintf(stderr, "no match\n");
         exit(1);
@@ -1160,9 +1185,6 @@ int main(int argc, char *argv[]) {
     }
     re_free(ctx);
     exit(0);
-
-    //    struct set *s = build_set("[a-zA-Z0-9]");
-//    printf("Set: %08x %08x %08x %08x\n", (uint32_t)s->d[0], (uint32_t)s->d[1], (uint32_t)s->d[2], (uint32_t)s->d[3]);
 
 
    // struct rectx *ctx;
