@@ -821,6 +821,9 @@ int re_match(struct rectx *ctx, char *p, int len, int flags) {
                     goto new_b_or_parent;
 
                 case OP_ANCHOR:
+                    // CHeck for a ghost match on these...
+                    if (t->lastghostmatch == n) goto die;
+                    t->lastghostmatch = n;
                     switch (n->ch[0]) {
                         case 'b':       if (p == start) {
                                             if (isalnum(*p)) goto parent;
@@ -1167,7 +1170,7 @@ int main(int argc, char *argv[]) {
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
 
 //    struct rectx *ctx = re_compile("^(a(bc))*d", 0);
-    struct rectx *ctx = re_compile("^(.*)\\bhello\\b xx$", 0);
+    struct rectx *ctx = re_compile("^+(.*)\\bhello\\b xx$", 0);
     if (!ctx) {
         fprintf(stderr, "no compile\n");
         exit(1);
