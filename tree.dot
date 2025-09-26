@@ -1,85 +1,77 @@
 digraph tree {
-    n0x4a8f0d0 [label="(4)
+    n0xb965b7ba1330 [label="(4)
 CONCAT
 "];
-    n0x4a8f0d0 -> n0x4a8f090 [label="a"];
-    n0x4a8f090 [label="(2)
+    n0xb965b7ba1330 -> n0xb965b7ba12f0 [label="a"];
+    n0xb965b7ba12f0 [label="(2)
 STAR
 lazy"];
-    n0x4a8f090 -> n0x4a8f070 [label="b"];
-    n0x4a8f070 [label="(1)
+    n0xb965b7ba12f0 -> n0xb965b7ba12d0 [label="b"];
+    n0xb965b7ba12d0 [label="(1)
 MATCH
 '.'"];
-    n0x4a8f0d0 -> n0x4a8f2f0 [label="b"];
-    n0x4a8f2f0 [label="(21)
+    n0xb965b7ba1330 -> n0xb965b7ba1510 [label="b"];
+    n0xb965b7ba1510 [label="(19)
 CONCAT
 "];
-    n0x4a8f2f0 -> n0x4a8f0b0 [label="a"];
-    n0x4a8f0b0 [label="(3)
+    n0xb965b7ba1510 -> n0xb965b7ba1310 [label="a"];
+    n0xb965b7ba1310 [label="(3)
 GROUP
 0"];
-    n0x4a8f0b0 -> n0x4a8f150 [label="b"];
-    n0x4a8f150 [label="(8)
+    n0xb965b7ba1310 -> n0xb965b7ba1390 [label="b"];
+    n0xb965b7ba1390 [label="(7)
 CONCAT
 "];
-    n0x4a8f150 -> n0x4a8f0f0 [label="a"];
-    n0x4a8f0f0 [label="(5)
-GROUP
-1"];
-    n0x4a8f0f0 -> n0x4a8f110 [label="b"];
-    n0x4a8f110 [label="(6)
-MATCH
-'.'"];
-    n0x4a8f150 -> n0x4a8f1b0 [label="b"];
-    n0x4a8f1b0 [label="(11)
-CONCAT
-"];
-    n0x4a8f1b0 -> n0x4a8f130 [label="a"];
-    n0x4a8f130 [label="(7)
-GROUP
-2"];
-    n0x4a8f130 -> n0x4a8f170 [label="b"];
-    n0x4a8f170 [label="(9)
-MATCH
-'.'"];
-    n0x4a8f1b0 -> n0x4a8f1f0 [label="b"];
-    n0x4a8f1f0 [label="(13)
-CONCAT
-"];
-    n0x4a8f1f0 -> n0x4a8f190 [label="a"];
-    n0x4a8f190 [label="(10)
+    n0xb965b7ba1390 -> n0xb965b7ba1350 [label="a"];
+    n0xb965b7ba1350 [label="(5)
 MATCH
 'a'"];
-    n0x4a8f1f0 -> n0x4a8f230 [label="b"];
-    n0x4a8f230 [label="(15)
+    n0xb965b7ba1390 -> n0xb965b7ba13d0 [label="b"];
+    n0xb965b7ba13d0 [label="(9)
 CONCAT
 "];
-    n0x4a8f230 -> n0x4a8f1d0 [label="a"];
-    n0x4a8f1d0 [label="(12)
+    n0xb965b7ba13d0 -> n0xb965b7ba1370 [label="a"];
+    n0xb965b7ba1370 [label="(6)
 MATCH
 'b'"];
-    n0x4a8f230 -> n0x4a8f270 [label="b"];
-    n0x4a8f270 [label="(17)
+    n0xb965b7ba13d0 -> n0xb965b7ba1410 [label="b"];
+    n0xb965b7ba1410 [label="(11)
 CONCAT
 "];
-    n0x4a8f270 -> n0x4a8f210 [label="a"];
-    n0x4a8f210 [label="(14)
+    n0xb965b7ba1410 -> n0xb965b7ba13b0 [label="a"];
+    n0xb965b7ba13b0 [label="(8)
 MATCH
 'c'"];
-    n0x4a8f270 -> n0x4a8f2b0 [label="b"];
-    n0x4a8f2b0 [label="(19)
+    n0xb965b7ba1410 -> n0xb965b7ba1450 [label="b"];
+    n0xb965b7ba1450 [label="(13)
 CONCAT
 "];
-    n0x4a8f2b0 -> n0x4a8f250 [label="a"];
-    n0x4a8f250 [label="(16)
-MATCHGRP
-2"];
-    n0x4a8f2b0 -> n0x4a8f290 [label="b"];
-    n0x4a8f290 [label="(18)
-MATCHGRP
-1"];
-    n0x4a8f2f0 -> n0x4a8f2d0 [label="b"];
-    n0x4a8f2d0 [label="(20)
+    n0xb965b7ba1450 -> n0xb965b7ba13f0 [label="a"];
+    n0xb965b7ba13f0 [label="(10)
+CRLF
+"];
+    n0xb965b7ba1450 -> n0xb965b7ba1490 [label="b"];
+    n0xb965b7ba1490 [label="(15)
+CONCAT
+"];
+    n0xb965b7ba1490 -> n0xb965b7ba1430 [label="a"];
+    n0xb965b7ba1430 [label="(12)
+MATCH
+'d'"];
+    n0xb965b7ba1490 -> n0xb965b7ba14d0 [label="b"];
+    n0xb965b7ba14d0 [label="(17)
+CONCAT
+"];
+    n0xb965b7ba14d0 -> n0xb965b7ba1470 [label="a"];
+    n0xb965b7ba1470 [label="(14)
+MATCH
+'e'"];
+    n0xb965b7ba14d0 -> n0xb965b7ba14b0 [label="b"];
+    n0xb965b7ba14b0 [label="(16)
+MATCH
+'f'"];
+    n0xb965b7ba1510 -> n0xb965b7ba14f0 [label="b"];
+    n0xb965b7ba14f0 [label="(18)
 DONE
 "];
 }

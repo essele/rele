@@ -36,6 +36,7 @@ struct re_match_t {
 
 enum {
     OP_NOP = 0, OP_CONCAT, OP_MATCH, OP_MATCHGRP, OP_DONE,
+    OP_CRLF,
     OP_ALTERNATE = '|',
     OP_PLUS = '+', OP_STAR = '*', OP_QUESTION = '?', OP_GROUP = '(',
     OP_BEGIN = '^', OP_END = '$', OP_MULT = '{',
@@ -532,8 +533,15 @@ struct rectx *re_compile(char *regex, uint32_t flags) {
                 } else {
                     last->ch[0] = *p;
                     if (*p == '\\') {
-                        last->ch[1] = *++p;
-                        if (!*p) goto fail;         // backslash on the end
+                        // Handle special cases....
+                        if (p[1] == 'R') {
+                            // This is a CRLF special...
+                            last->op = OP_CRLF;
+                            p++;
+                        } else {
+                            last->ch[1] = *++p;
+                            if (!*p) goto fail;         // backslash on the end
+                        }
                     }
                 }
         }
@@ -845,6 +853,24 @@ int re_match(struct rectx *ctx, char *p, int len, int flags) {
                     t->last = n;
                     continue;
 
+                // We always match a LF on either go around, but if not and we come from above then we must
+                // match a CR and go again. On the second time around if doesn't matter if we don't match.
+                case OP_CRLF:
+                    if (ch == 10) {
+                        t->last = n;
+                        t->n = n->parent;
+                        goto next;
+                    }
+                    if (t->last == n->parent) {
+                        if (ch == 13) {
+                            // Stay here for another go...
+                            t->last = n;
+                            goto next;
+                        }
+                        goto die;
+                    }
+                    goto parent;
+                    
                 // If we match we just go back up but let the next task run. If we
                 // fail then we die.
                 case OP_MATCH:
@@ -971,6 +997,7 @@ char *opmap(uint8_t op) {
         case OP_MATCHSET:   return "MATCHSET";
         case OP_MULT:       return "MULT";
         case OP_MATCHGRP:   return "MATCHGRP";
+        case OP_CRLF:       return "CRLF";
         default:            return "UNKNOWN";
     }
 }
@@ -1030,6 +1057,10 @@ void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
             GEND;
             goto bonly;
 
+        case OP_CRLF:
+            GEND;
+            return;
+
         case OP_PLUS:
         case OP_QUESTION:
         case OP_STAR:
@@ -1076,20 +1107,15 @@ int main(int argc, char *argv[]) {
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
 
 //    struct rectx *ctx = re_compile("^(a(bc))*d", 0);
-    struct rectx *ctx = re_compile("(.)(.)abc\\{2}\\1", 0);
+    struct rectx *ctx = re_compile("abc\\Rdef", 0);
     if (!ctx) {
         fprintf(stderr, "no compile\n");
         exit(1);
     }
     
     export_tree(ctx, "tree.dot");
-
-    int x;
-    for (int i=0; i < 1000; i++) {
-        x = re_match(ctx, "xyabcyx", 0, F_KEEP_TASKS);
-        x = re_match(ctx, "xyabcyx", 0, F_KEEP_TASKS);
-        x = re_match(ctx, "xyabcyx", 0, F_KEEP_TASKS);
-    }
+ 
+    int x = re_match(ctx, "abc\r\ndef", 0, F_KEEP_TASKS);
     if (!ctx->done) {
         fprintf(stderr, "no match\n");
         exit(1);
