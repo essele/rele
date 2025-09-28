@@ -427,7 +427,7 @@ struct rectx *alloc_ctx(char *regex) {
     // We also need space for our extra added nodes
     nodes += matches + splits + 6;
 
-    fprintf(stderr, "Matches = %d, Splits = %d, Nodes = %d\n", matches, splits, nodes);
+//    fprintf(stderr, "Matches = %d, Splits = %d, Nodes = %d\n", matches, splits, nodes);
 
     struct rectx *ctx = malloc(sizeof(struct rectx) +
                                 (nodes * sizeof(struct node)) + 
@@ -650,7 +650,7 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
         memset((void *)task, 0, sizeof(struct task));
 
         tcount++;
-        fprintf(stderr, "max task count is %d\n", tcount);
+//        fprintf(stderr, "max task count is %d\n", tcount);
     }
 
     if (from) {
@@ -1170,21 +1170,45 @@ int main(int argc, char *argv[]) {
     //struct rectx *ctx = re_compile("ab((.)(.))abc(\\d+)h", 0);
 
 //    struct rectx *ctx = re_compile("^(a(bc))*d", 0);
-    struct rectx *ctx = re_compile("^+(.*)\\bhello\\b xx$", 0);
-    if (!ctx) {
-        fprintf(stderr, "no compile\n");
-        exit(1);
+
+if (0) {
+    for (int j=0; j < 100; j++) {
+        for (int i=0; i < 100000; i++) {
+
+
+            struct rectx *ctx = re_compile("abc", 0);
+            if (!ctx) {
+                fprintf(stderr, "no compile\n");
+                exit(1);
+            }
+            
+            //export_tree(ctx, "tree.dot");
+            char *string = "adsfjhasdfjhabcasdfajskdh";
+        
+            int x = re_match(ctx, string, 0, 0 /*F_KEEP_TASKS*/);
+//            if (!ctx->done) {
+//                fprintf(stderr, "no match\n");
+//                exit(1);
+//            }
+            re_free(ctx);
+        }
     }
-    
+}
+//exit(0);
+
+    struct rectx *ctx = re_compile("abc", 0);
     export_tree(ctx, "tree.dot");
- 
-    int x = re_match(ctx, "abc hello xx", 0, F_KEEP_TASKS);
+
+    char *string = "adsfjhasdfjhabcasdfajskdh";
+        
+    int x = re_match(ctx, string, 0, 0 /*F_KEEP_TASKS*/);
     if (!ctx->done) {
         fprintf(stderr, "no match\n");
-        exit(1);
     }
+
     for (int i=0; i < ctx->groups; i++) {
-        fprintf(stderr, "%d: %d -> %d\n", i, ctx->done->grp[i].rm_so, ctx->done->grp[i].rm_eo);
+        int len = ctx->done->grp[i].rm_eo - ctx->done->grp[i].rm_so;
+        fprintf(stderr, "%d:  %d -> %d [%.*s]\n", i, ctx->done->grp[i].rm_so, ctx->done->grp[i].rm_eo, len, (char *)(string + ctx->done->grp[i].rm_so));
     }
     re_free(ctx);
     exit(0);

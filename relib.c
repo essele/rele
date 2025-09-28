@@ -8,7 +8,7 @@ int main(int argc, char *argv[]) {
     regex_t regex;
     regmatch_t  pmatch[5];
 
-    if (0) {
+    if (1) {
     for (int j=0; j < 100; j++) {
         for (int i=0; i < 100000; i++) {
     
@@ -16,15 +16,17 @@ int main(int argc, char *argv[]) {
                 exit(EXIT_FAILURE);
 
 
-            char *string = "blahblahabcd";
+            char *string = "adsfjhasdfjhabcasdfajskdh";
 
             int res = regexec(&regex, string, ARRAY_SIZE(pmatch), pmatch, 0);
             regfree(&regex);
         }
     }
     }
-    char *string = "xxasdfasdfasdasdfabcbcd";
-    if (regcomp(&regex, "(.|.|.).*abc", REG_EXTENDED)) exit(EXIT_FAILURE);
+exit(0);
+    char *string = "adsfjhasdfjhabcasdfajskdh";
+//    char *string = "xxasdfasdfasdasdfabcbcd";
+    if (regcomp(&regex, "abc", REG_EXTENDED)) exit(EXIT_FAILURE);
     int res = regexec(&regex, string, ARRAY_SIZE(pmatch), pmatch, 0);
     
     if (res == 0) {
