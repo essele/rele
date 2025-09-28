@@ -3,6 +3,7 @@
 import os
 import sys
 import re
+from contextlib import redirect_stdout
 
 print("Hello")
 
@@ -108,28 +109,35 @@ def do_hex(s):
 
 cases = build_cases()
 
-i = 0
-for case in cases:
-    num = f"{i:03}"
+with open('test_cases.c','w') as outfile:
+    with redirect_stdout(outfile):
 
-    print(case)
-    
-    #
-    # We need to output the text first so we can reference it...
-    #
-    print(F"const char text_{num}[] = {{\n    {do_hex(case["text"])} }};")
+        print("/**")
+        print(" * AUTOMATICALLY GENERATED - DO NOT EDIT")
+        print(" */")
+        print("#include \"test.h\"")        
+        print("")
+
+        i = 0
+        for case in cases:
+            num = f"{i:03}"
+
+            #
+            # We need to output the text first so we can reference it...
+            #
+            print(F"const char text_{num}[] = {{\n    {do_hex(case["text"])} }};")
 
 
-    print(F"const struct case case_{num} = {{")
-    print(F"\t.name = \"{case["name"]}\"," )
-    print(F"\t.desc = \"{case["desc"]}\"," )
-    print(F"\t.regex = \"{quote(case["regex"])}\"," )
-    print(F"\t.text = (char *)text_{num}," )
-    #print(F"\t.text = {{ {do_hex(case["text"])} }},")
-    print(F"\t.groups = {len(case["res"])}," )
+            print(F"const struct testcase case_{num} = {{")
+            print(F"\t.name = \"{case["name"]}\"," )
+            print(F"\t.desc = \"{case["desc"]}\"," )
+            print(F"\t.regex = \"{quote(case["regex"])}\"," )
+            print(F"\t.text = (char *)text_{num}," )
+            #print(F"\t.text = {{ {do_hex(case["text"])} }},")
+            print(F"\t.groups = {len(case["res"])}," )
 
-    out = "\t.res = { " + ", ".join(f"{{ {a}, {b} }}" for a, b in case["res"]) + " },"
-    print(out)
+            out = "\t.res = { " + ", ".join(f"{{ {a}, {b} }}" for a, b in case["res"]) + " },"
+            print(out)
 
-    print("};")
-    i += 1
+            print("};")
+            i += 1

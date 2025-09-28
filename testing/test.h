@@ -10,10 +10,11 @@ struct result {
 /*
  * Main structure for holding test items
  */
-struct item {
+struct testcase {
     char *name;
+    char *desc;
     char *regex;
-    char *string;
+    char *text;
     int rc;
     int groups;
     struct result res[];
