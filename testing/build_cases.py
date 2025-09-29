@@ -141,3 +141,12 @@ with open('test_cases.c','w') as outfile:
 
             print("};")
             i += 1
+
+        print("const struct testcase *cases[] = {")
+        i = 0
+        for case in cases:
+            num = f"{i:03}"
+            print(F"\t&case_{num},")
+            i += 1
+        
+        print("\t0\n};")

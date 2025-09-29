@@ -5,16 +5,28 @@
 #include <string.h>
 #include <pthread.h>
 
+#include "memwrap.h"
+
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-static size_t total_allocs = 0;
-static size_t total_allocated = 0;
-static size_t total_freed = 0;
-static size_t total_frees = 0;
+
+static struct memstats  memstats;
+
 
 typedef void *(*malloc_t)(size_t);
 typedef void (*free_t)(void *);
 typedef void *(*calloc_t)(size_t, size_t);
 typedef void *(*realloc_t)(void *, size_t);
+
+void memstats_zero() {
+    memstats.total_allocs = 0;
+    memstats.total_allocated = 0;
+    memstats.total_frees = 0;
+    memstats.total_freed = 0;
+}
+
+struct memstats *memstats_get() {
+    return &memstats;
+}
 
 void *malloc(size_t size) {
     static malloc_t real_malloc = NULL;
@@ -24,9 +36,8 @@ void *malloc(size_t size) {
     void *p = real_malloc(size);
 
     pthread_mutex_lock(&lock);
-    total_allocs++;
-    total_allocated += size;
-    fprintf(stderr, "[malloc] %zu bytes -> %p (total=%zu)\n", size, p, total_allocated - total_freed);
+    memstats.total_allocs++;
+    memstats.total_allocated += size;
     pthread_mutex_unlock(&lock);
 
     return p;
@@ -41,8 +52,7 @@ void free(void *ptr) {
         // (optional) track size if you keep a map of pointer->size
         pthread_mutex_lock(&lock);
         // TODO: how do we get the size of the freed block?
-        total_frees++;
-        fprintf(stderr, "[free] %p\n", ptr);
+        memstats.total_frees++;
         pthread_mutex_unlock(&lock);
     }
 
@@ -57,9 +67,8 @@ void *calloc(size_t nmemb, size_t size) {
     void *p = real_calloc(nmemb, size);
 
     pthread_mutex_lock(&lock);
-    total_allocs++;
-    total_allocated += nmemb * size;
-    fprintf(stderr, "[calloc] %zu x %zu -> %p (total=%zu)\n", nmemb, size, p, total_allocated - total_freed);
+    memstats.total_allocs++;
+    memstats.total_allocated += nmemb * size;
     pthread_mutex_unlock(&lock);
 
     return p;
@@ -73,9 +82,8 @@ void *realloc(void *ptr, size_t size) {
     void *p = real_realloc(ptr, size);
 
     pthread_mutex_lock(&lock);
-    total_allocated += size;
-    total_allocs++;         // not realy, it's a resize?
-    fprintf(stderr, "[realloc] %p resized to %zu -> %p (total=%zu)\n", ptr, size, p, total_allocated - total_freed);
+    memstats.total_allocated += size;
+    memstats.total_allocs++;         // not realy, it's a resize?
     pthread_mutex_unlock(&lock);
 
     return p;
