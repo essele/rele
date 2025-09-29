@@ -37,6 +37,7 @@ const struct testcase *find_case(char *name) {
 extern struct relib funcs_libc;
 extern struct relib funcs_rele;
 extern struct relib funcs_pcre;
+extern struct relib funcs_re2;
 
 
 
@@ -87,8 +88,9 @@ int main(int argc, char *argv[]) {
     memstats_zero();
     stack_fill();
 
+    struct relib *re = &funcs_re2;
 //    struct relib *re = &funcs_pcre;
-    struct relib *re = &funcs_rele;
+//    struct relib *re = &funcs_rele;
 //    struct relib *re = &funcs_libc;
 
     if (!re->compile(t->regex)) {
