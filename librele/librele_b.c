@@ -17,20 +17,25 @@
 #define DEBUG_ID    
 
 
-
-// Internal flags ... created by compile stage
-#define IF_NOT_LAZY (1 << 15)
-
-
-
-
 enum {
-    OP_NOP = 0, OP_CONCAT, OP_MATCH, OP_MATCHGRP, OP_DONE,
-    OP_CRLF, OP_ANCHOR,
-    OP_ALTERNATE = '|',
-    OP_PLUS = '+', OP_STAR = '*', OP_QUESTION = '?', OP_GROUP = '(',
-    OP_BEGIN = '^', OP_END = '$', OP_MULT = '{',
-    OP_MATCHSET = '[',
+    // Order in terms of liklihood
+    OP_CONCAT,
+    OP_MATCH,
+
+    OP_PLUS,
+    OP_STAR,
+    OP_QUESTION,
+
+    OP_GROUP,
+    OP_ALTERNATE,
+
+    OP_ANCHOR, 
+    OP_MATCHSET,
+    OP_MATCHGRP,
+    OP_MULT, 
+    OP_CRLF,
+
+    OP_DONE,
 };
 
 // ============================================================================
@@ -80,8 +85,6 @@ struct rectx {
     uint16_t        flags;
     uint8_t         groups;     // allows up to 255 groups
     uint8_t         pad;        // not used
-
-    uint32_t        pad2;
 
     // Memory for nodes and sets will follow this...
 };
@@ -346,6 +349,17 @@ error:
     return 1;
 }
 
+static inline int hexval(unsigned char c) {
+    unsigned d = c - '0';
+    unsigned m = (unsigned)(c - 'A') <= 5; // true if 'A'..'F'
+    unsigned n = (unsigned)(c - 'a') <= 5; // true if 'a'..'f'
+    return (d <= 9) * d
+         + m * (c - 'A' + 10)
+         + n * (c - 'a' + 10);
+}
+static inline int tohex(const char *p) {
+    return (hexval(p[0]) << 4) | hexval(p[1]);
+}
 
 // ------------------------------------------------------------------------
 // Dummy (and hopefully fast) version of the compiler that is purely used
@@ -363,35 +377,35 @@ struct rectx *alloc_ctx(char *regex) {
         // are the key. We will always have one less "splits" (i.e. concat or 
         // alternate) than we have matches, everything else is always a node.
         switch (*p) {
-            case OP_MULT:
+            case '{':
                 p = minmax(p, NULL);
                 if (!p) return NULL;        // min max error
                 // drop through...
 
             // These are always a node...
-            case OP_PLUS: case OP_STAR: case OP_QUESTION:
+            case '+': case '*': case '?':
                 if (p[1] == '?') p++;       // lazy version
                 nodes++;
                 break;
 
             // An empty group counts as a node and a match...
-            case OP_GROUP:
+            case '(':
                 if (p[1] == ')' || (p[1] == '?' && p[2] == ':' && p[3] == ')')) { matches++; }
                 nodes++;
                 break; 
 
             // Ignore these (alternate we cover via matches)...
-            case OP_ALTERNATE: case ')':
+            case '|': case ')':
                 break;
 
-            case OP_MATCHSET:
+            case '[':
                 p = dummy_set(p);
                 if (!p) return NULL;        // set error (not impl)
                 sets++;
                 // drop through
 
             // These are effectively matches...
-            case OP_BEGIN: case OP_END:
+            case '^': case '$':
                 matches++;
                 break;
 
@@ -409,10 +423,15 @@ struct rectx *alloc_ctx(char *regex) {
                 }
 
                 matches++;
-                if (*p == '\\' && is_group(p+1, NULL, &p, NULL)) {
-                    // Check for group syntax/scale issues...
-                    if (!p) return NULL;
-                } else if (*p == '\\') p++;
+                if (*p == '\\') {
+                    if (is_group(p+1, NULL, &p, NULL)) {
+                        if (!p) return NULL;                                  
+                    } else if (p[1] == 'x') {
+                        p += 3;
+                    } else {
+                        p++;        // move past the backslash
+                    }
+                }
         }
         p++;
     }
@@ -420,7 +439,8 @@ struct rectx *alloc_ctx(char *regex) {
     // We need one less splitter than matches
     int splits = matches - 1;
     // We also need space for our extra added nodes
-    nodes += matches + splits + 6;
+    //nodes += matches + splits + 6;
+    nodes += matches + splits + 3;
 
 //    fprintf(stderr, "Matches = %d, Splits = %d, Nodes = %d\n", matches, splits, nodes);
 
@@ -466,23 +486,29 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
 
     while (*p) {
         switch (*p) {
-            case OP_PLUS:
-            case OP_STAR:
-            case OP_QUESTION:
+            case '+':
+                last = create_node_above(ctx, last, OP_PLUS, NULL, last);
+                goto star_plus_question;
+            case '*':
+                last = create_node_above(ctx, last, OP_STAR, NULL, last);
+                goto star_plus_question;
+            case '?':
+                last = create_node_above(ctx, last, OP_QUESTION, NULL, last);
+                // fall through
+
+star_plus_question:
                 lazy = (p[1] == '?' ? 1 : 0);
-                last = create_node_above(ctx, last, (uint8_t)*p, NULL, last);
                 last->lazy = lazy;
                 p += lazy;              // skip the ? if we have it
-                if (!lazy) ctx->flags |= IF_NOT_LAZY;
                 break;
 
-            case OP_ALTERNATE:
+            case '|':
                 // Get to the previous thing...
                 while (last->parent && last->parent->op == OP_CONCAT) { last = last->parent; }
                 last = create_node_above(ctx, last, OP_ALTERNATE, last, NULL);
                 break;
 
-            case OP_GROUP:
+            case '(':
                 last = create_node_here(ctx, last, OP_GROUP, NULL, NULL);
                 if (p[1] == '?' && p[2] && p[2] == ':') {
                     last->group = NO_GROUP;
@@ -510,26 +536,23 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
                 while(last && last->op != OP_GROUP) { last = last->parent; }
                 break;
 
-            case OP_MULT:
+            case '{':
                 last = create_node_above(ctx, last, OP_MULT, NULL, last);
                 p = minmax(p, last);
                 if (!p) goto fail;
                 if (p[1] == '?') { 
                     last->lazy = 1; 
                     p++; 
-                } else {
-                    ctx->flags |= IF_NOT_LAZY;
                 }
                 break;
 
-            case OP_BEGIN:
-            case OP_END:
-//                last = create_node_here(ctx, last, (uint8_t)*p, NULL, NOTUSED);
+            case '^':
+            case '$':
                 last = create_node_here(ctx, last, OP_ANCHOR, NULL, NULL);
                 last->ch[0] = *p;
                 break;
 
-            case OP_MATCHSET:
+            case '[':
                 last = create_node_here(ctx, last, OP_MATCHSET, NULL, NULL);
                 if (!last) goto fail;
                 p = build_set(ctx, p, last);
@@ -557,6 +580,39 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
                 // We are going to need a OP_MATCH or an OP_MATCHGRP
                 last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
                 if (!last) goto fail;
+
+                
+                if (*p == '\\') {
+                    if (is_group(p+1, &(last->mgrp), &p, NULL)) {
+                        if (!p) goto fail;          // group syntax error
+                        last->op = OP_MATCHGRP;
+                    } else {
+                        // Handle special cases and normal backslash chars...
+                        switch (p[1]) {
+                            case 'R':   last->op = OP_CRLF;
+                                        break;
+                            case 'b':   
+                            case 'B':
+                                        last->op = OP_ANCHOR;
+                                        last->ch[0] = p[1];
+                                        break;
+                            case 'x':
+                                        last->ch[0] = tohex(p+2);
+                                        p += 2;
+                                        break;
+                            default:
+                                        last->ch[0] = *p;
+                                        last->ch[1] = p[1];
+                                        if (!p[1]) goto fail;
+                        }
+                        p++;
+                    }
+                } else {
+                    // The single char case...
+                    last->ch[0] = *p;
+                }
+/*
+
                 if (*p == '\\' && is_group(p+1, &(last->mgrp), &p, NULL)) {
                     if (!p) goto fail;              // group syntax error
                     last->op = OP_MATCHGRP;
@@ -579,6 +635,8 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
                         p++;
                     }
                 }
+                    (*/
+                    
         }
         p++;
     }
@@ -727,7 +785,6 @@ static inline int has_prior_match(struct rectx *ctx, struct task *run_list, stru
     for (struct task *x = run_list; x != t; x = x->next) {
         if (x->last == n) {
             if (has_same_groups(ctx, x, t) && has_same_stack(ctx, x, t)) return 1;
-            return 1;
         }
     }
     return 0;
@@ -770,8 +827,6 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
     struct task *t;
     struct set *set;
-    //char *start = p;
-    //char *end = p + (len ? len : strlen(p));        // TODO: remove and use len or zero check?
 
     do {
         char ch = (p < end ? *p : 0);
@@ -788,255 +843,248 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
         while (t) {
             struct node *n = t->n;
 
-            switch(n->op) {
-                // If we get to OP_DONE then we are done, but there might be other
-                // tasks to continue. We keep the first task completed at each index,
-                // then overwrite for the next one.
-                //
-                // However, since the tasks are prioritised based on lazyness etc, then
-                // if there are no tasks before us, then we are the one!
-                //
-                // Old theory:
-                // If our regex is ALL lazy, then the first completed is the answer!
-                //
-                case OP_DONE:
-                    // If we have already completed at this index, then die...
-                    if (ctx->done && ctx->done->p == p) goto die;
+            // Probablt the most likely...
+            if (n->op == OP_CONCAT) {
+                if (t->last == n->a) goto leg_b;
+                if (t->last == n->b) goto parent;
+                goto leg_a;
+            }
 
-                    // Free the previous candidate if there was one...
-                    if (ctx->done) task_release(ctx, ctx->done);
+            // Attempt to optimise this a bit...
+            if (n->op >= OP_GROUP) goto from_GROUP;
 
-                    // TODO: testing for now .. first in task list to finish.
-                    if (run_list == t) {
-                        // remove from the running list...
-                        run_list = t-> next;
-                        prev = NULL;
-
-                        // Mark us as the candidate...
-                        t->next = NULL;
-                        t->p = p;
-                        ctx->done = t;
-                        goto done;
-                    }
-                    // TODO: there might be another optimisation, if we die (at the top of this case)
-                    // then we might be done. Or does that not work.
-
-                    // Remove ourselves from the running list...
-                    if (prev) { prev->next = t->next; } else { run_list = t->next; prev = NULL; }
-
-
-                    // Mark us as the candidate...
-                    t->next = NULL;
-                    t->p = p;
-                    ctx->done = t;
-
-                    // If we are all lazy, the first to finish is the one!
-//                    if (!(ctx->flags & IF_NOT_LAZY)) { fprintf(stderr, "XXXXX\n"); goto done; } 
-
-                    // And move on to the next task...
-                    if (prev) { t = prev->next; } else { t = run_list; /* goto tasks_done; */ }
-                    continue;
-
-                case OP_CONCAT:
-                    if (t->last == n->a) goto leg_b;
-                    if (t->last == n->b) goto parent;
-                    goto leg_a;
-
-                // If we get here from above then spin off a new task to go down leg b
-                // and we go down leg a. Anything coming back up, goes to the parent.
-                case OP_ALTERNATE:
-                    if (t->last == n->parent) {
-                        t->next = task_new(ctx, t, t->next, n, n->b);
-                        goto leg_a;
-                    }
-                    goto parent;
-
-                // If we get here from above, then go down the b leg. If we get here
-                // from b, then it was successful and we spawn. Who goes where depends
-                // on if we are lazy or not...
-                case OP_PLUS:
-                    if (t->last == n->parent) goto leg_b;
-                    goto new_b_or_parent;
-
-                // If we get here from above, we spawn to go back (zero) then we go
-                // down b. If we get here from b, then carry on back up.
-                case OP_QUESTION:
-                    if (t->last == n->b) goto parent;
-                    goto new_b_or_parent;
-
-                // If we hit from above then spawn to go right back up (zero) and from
-                // b we do the same.
-                case OP_STAR:
-                    goto new_b_or_parent;
-
-                case OP_ANCHOR:
-                    // CHeck for a ghost match on these...
-                    if (t->lastghostmatch == n) goto die;
-                    t->lastghostmatch = n;
-                    switch (n->ch[0]) {
-                        case 'b':       if (p == start) {
-                                            if (isalnum(*p)) goto parent;
-                                        } else if (p == end) {
-                                            if (isalnum(p[-1])) goto parent;
-                                        } else if (isalnum(p[-1]) ^ isalnum(p[0])) {
-                                            goto parent;
-                                        }
-                                        goto die;
-                        case 'B':       if (p == start) {
-                                            if (!isalnum(*p)) goto parent;
-                                        } else if (p == end) {
-                                            if (!isalnum(p[-1])) goto parent;
-                                        } else if (!(isalnum(p[-1]) & isalnum(p[0]))) {
-                                            goto parent;
-                                        }
-                                        goto die;
-                        case '^':       if (p == start) goto parent; 
-                                        goto die;
-                        case '$':       if (p == end) goto parent;
-                                        goto die;
-                        default:        goto die;       // shouldn't happen
-
-                    }
-
-                // If we come from above then get a new stack position and init, otherwise
-                // count until we hit min, then spawn until max...
-                case OP_MULT:
-                    if (t->last == n->parent) {
-                        if (t->sp == 0) {
-                            // TODO: stack error
-                            fprintf(stderr, "stack nesting too deep.\n");
-                            goto die;
-                        }
-                        t->sp--;
-                        t->stack[t->sp] = 0;
-                    }
-                    // If we've hit max, then go back up...
-                    if (t->stack[t->sp] == n->max) { t->sp++; goto parent; }
-
-                    // Normal op .. inc if under absolute max
-                    if (t->stack[t->sp] < NO_MAX) t->stack[t->sp]++;
-                    
-                    // If we haven't hit min, then do b again...
-                    if (t->stack[t->sp] <= n->min) goto leg_b;
-
-                    // We must have hit min, so need to spawn...
-                    if (n->lazy) {
-                        t->next = task_new(ctx, t, t->next, n, n->b);
-                        t->n = n->parent;
-                        t->sp++;        // parent
-                    } else {
-                        t->next = task_new(ctx, t, t->next, n, n->parent);
-                        t->next->sp++;  // parent
-                        t->n = n->b;
-                    }
+            // Probably the second most likely...
+            if (n->op == OP_MATCH) {
+                if (ch && matchone(n->ch, ch)) {
+                    if (has_prior_match(ctx, run_list, n, t)) goto die;
                     t->last = n;
-                    continue;
+                    t->n = n->parent;
+                    t->lastghostmatch = NULL;
+                    goto next;
+                }
+                goto die;
+            }
 
-                case OP_GROUP:
-                    // If we hit an empty group, then make sure we haven't just hit it,
-                    // in which case we die otherwise we proceed back up to the parent
-                    if (n->b == NOTUSED) {
-                        if (t->lastghostmatch == n) {
-                            // This is a second hit here, so we need to die to avoid
-                            // inifinite tasks
-                            goto die;
-                        }
-                        t->lastghostmatch = n;
-                        t->n = n->parent;
-                        t->last = n;
-                        t->grp[n->group].rm_so = t->grp[n->group].rm_eo = (int32_t)(p - start);
-                        continue;
-                    }
-                    if (t->last == n->b) {
-                        // On the way back up... fill in the length
-                        // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
-                        t->n = n->parent;
-                        if (n->group != NO_GROUP) { t->grp[n->group].rm_eo = (int32_t)(p - start); }
-                    } else {
-                        // Going down leg b... mark the start
-                        t->n = n->b;
-                        // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
-                        if (n->group != NO_GROUP) { t->grp[n->group].rm_so = (int32_t)(p - start); }
-                    }
-                    t->last = n;
-                    continue;
+            // If we get here from above, then go down the b leg. If we get here
+            // from b, then it was successful and we spawn. Who goes where depends
+            // on if we are lazy or not...
+            if (n->op == OP_PLUS) {
+                if (t->last == n->parent) goto leg_b;
+                goto new_b_or_parent;
+            }
 
-                // We always match a LF on either go around, but if not and we come from above then we must
-                // match a CR and go again. On the second time around if doesn't matter if we don't match.
-                case OP_CRLF:
-                    if (ch == 10) {
-                        t->last = n;
-                        t->n = n->parent;
-                        goto next;
-                    }
-                    if (t->last == n->parent) {
-                        if (ch == 13) {
-                            // Stay here for another go...
-                            t->last = n;
-                            goto next;
-                        }
+            // If we get here from above, we spawn to go back (zero) then we go
+            // down b. If we get here from b, then carry on back up.
+            if (n->op == OP_QUESTION) {
+                if (t->last == n->b) goto parent;
+                goto new_b_or_parent;
+            }
+
+            // If we hit from above then spawn to go right back up (zero) and from
+            // b we do the same.
+            if (n->op == OP_STAR) goto new_b_or_parent;
+
+from_GROUP:
+            // If we hit an empty group, then make sure we haven't just hit it,
+            // in which case we die otherwise we proceed back up to the parent
+            if (n->op == OP_GROUP) {
+                if (n->b == NOTUSED) {
+                    if (t->lastghostmatch == n) {
+                        // This is a second hit here, so we need to die to avoid
+                        // inifinite tasks
                         goto die;
                     }
-                    goto parent;
-                    
-                // If we match we just go back up but let the next task run. If we
-                // fail then we die.
-                case OP_MATCH:
-                    if (ch && matchone(n->ch, ch)) {
-                        if (has_prior_match(ctx, run_list, n, t)) goto die;
-                        t->last = n;
-                        t->n = n->parent;
-                        t->lastghostmatch = NULL;
-                        goto next;
-                    }
-                    goto die;
+                    t->lastghostmatch = n;
+                    t->n = n->parent;
+                    t->last = n;
+                    t->grp[n->group].rm_so = t->grp[n->group].rm_eo = (int32_t)(p - start);
+                    continue;
+                }
+                if (t->last == n->b) {
+                    // On the way back up... fill in the length
+                    // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
+                    t->n = n->parent;
+                    if (n->group != NO_GROUP) { t->grp[n->group].rm_eo = (int32_t)(p - start); }
+                } else {
+                    // Going down leg b... mark the start
+                    t->n = n->b;
+                    // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
+                    if (n->group != NO_GROUP) { t->grp[n->group].rm_so = (int32_t)(p - start); }
+                }
+                t->last = n;
+                continue;
+            }
 
-                case OP_MATCHSET:
-                    set = (struct set *)n->set;
-                    if (match_set(ch, set)) {
-                        if (has_prior_match(ctx, run_list, n, t)) goto die;
-                        t->last = n;
-                        t->n = n->parent;
-                        t->lastghostmatch = NULL;
-                        goto next;
-                    }
-                    goto die;
+            // If we get here from above then spin off a new task to go down leg b
+            // and we go down leg a. Anything coming back up, goes to the parent.
+            if (n->op == OP_ALTERNATE) {
+                if (t->last == n->parent) {
+                    t->next = task_new(ctx, t, t->next, n, n->b);
+                    goto leg_a;
+                }
+                goto parent;
+            }
 
-                // Match a previous group, coming from the top we initialise then stay
-                // here iterating... originally we used a separate variable, but a stack
-                // item should be fine.
-                case OP_MATCHGRP:
-                    if (t->last == n->parent) {
-                        // A zero length group match is a ghost match...
-                        if (t->grp[n->mgrp].rm_so == t->grp[n->mgrp].rm_eo) {
-                            if (t->lastghostmatch == n) goto die;
-                            t->lastghostmatch = n;
-                            goto parent;
-                        }
-                        // We will use a stack entry for tracking position...
-                        if (t->sp == 0) {
-                            fprintf(stderr, "STACK OVERFLOW, MATCHGRP\n");
-                            goto die;
-                        }
-                        t->sp--;
-                        t->stack[t->sp] = t->grp[n->mgrp].rm_so;
-                        t->lastghostmatch = NULL;
+            // If we get to OP_DONE then we are done, but there might be other
+            // tasks to continue. We keep the first task completed at each index,
+            // then overwrite for the next one.
+            //
+            // However, since the tasks are prioritised based on lazyness etc, then
+            // if there are no tasks before us, then we are the one!
+            //
+            if (n->op == OP_DONE) {
+                // If we have already completed at this index, then die...
+                if (ctx->done && ctx->done->p == p) goto die;
+
+                // Free the previous candidate if there was one...
+                if (ctx->done) task_release(ctx, ctx->done);
+
+                // Prep and store as the candidate...
+                t->p = p;
+                ctx->done = t;
+
+                // If we are the top of the task list we are completetly done
+                if (run_list == t) {
+                    run_list = t->next;
+                    t->next = NULL;
+                    goto done;
+                }
+                // Otherwise we aren't top, so go to next task...
+                prev->next = t->next;
+                t->next = NULL;
+                t = prev->next;
+                continue;
+            }
+
+            // CHeck for a ghost match on these...
+            if (n->op == OP_ANCHOR) {
+                if (t->lastghostmatch == n) goto die;
+                t->lastghostmatch = n;
+                switch (n->ch[0]) {
+                    case 'b':       if (p == start) {
+                                        if (isalnum(*p)) goto parent;
+                                    } else if (p == end) {
+                                        if (isalnum(p[-1])) goto parent;
+                                    } else if (isalnum(p[-1]) ^ isalnum(p[0])) {
+                                        goto parent;
+                                    }
+                                    goto die;
+                    case 'B':       if (p == start) {
+                                        if (!isalnum(*p)) goto parent;
+                                    } else if (p == end) {
+                                        if (!isalnum(p[-1])) goto parent;
+                                    } else if (!(isalnum(p[-1]) & isalnum(p[0]))) {
+                                        goto parent;
+                                    }
+                                    goto die;
+                    case '^':       if (p == start) goto parent; 
+                                    goto die;
+                    case '$':       if (p == end) goto parent;
+                                    goto die;
+                    default:        goto die;       // shouldn't happen
+
+                }
+            }
+
+
+            if (n->op == OP_MATCHSET) {
+                set = (struct set *)n->set;
+                if (match_set(ch, set)) {
+                    if (has_prior_match(ctx, run_list, n, t)) goto die;
+                    t->last = n;
+                    t->n = n->parent;
+                    t->lastghostmatch = NULL;
+                    goto next;
+                }
+                goto die;
+            }
+
+            // Match a previous group, coming from the top we initialise then stay
+            // here iterating... originally we used a separate variable, but a stack
+            // item should be fine.
+            if (n->op == OP_MATCHGRP) {
+                if (t->last == n->parent) {
+                    // A zero length group match is a ghost match...
+                    if (t->grp[n->mgrp].rm_so == t->grp[n->mgrp].rm_eo) {
+                        if (t->lastghostmatch == n) goto die;
+                        t->lastghostmatch = n;
+                        goto parent;
                     }
-                    if (ch == start[t->stack[t->sp]]) {
-                        if (has_prior_match(ctx, run_list, n, t)) goto die;
-                        t->last = n;
-                        t->stack[t->sp]++;
-                        if (t->stack[t->sp] == t->grp[n->mgrp].rm_eo) { 
-                            t->sp++; 
-                            t->n = n->parent; 
-                        }
-                        goto next;
+                    // We will use a stack entry for tracking position...
+                    if (t->sp == 0) {
+                        fprintf(stderr, "STACK OVERFLOW, MATCHGRP\n");
+                        goto die;
                     }
-                    goto die;
+                    t->sp--;
+                    t->stack[t->sp] = t->grp[n->mgrp].rm_so;
+                    t->lastghostmatch = NULL;
+                }
+                if (ch == start[t->stack[t->sp]]) {
+                    if (has_prior_match(ctx, run_list, n, t)) goto die;
+                    t->last = n;
+                    t->stack[t->sp]++;
+                    if (t->stack[t->sp] == t->grp[n->mgrp].rm_eo) { 
+                        t->sp++; 
+                        t->n = n->parent; 
+                    }
+                    goto next;
+                }
+                goto die;
+            }
+
+            // If we come from above then get a new stack position and init, otherwise
+            // count until we hit min, then spawn until max...
+            if (n->op == OP_MULT) {
+                if (t->last == n->parent) {
+                    if (t->sp == 0) {
+                        // TODO: stack error
+                        fprintf(stderr, "stack nesting too deep.\n");
+                        goto die;
+                    }
+                    t->sp--;
+                    t->stack[t->sp] = 0;
+                }
+                // If we've hit max, then go back up...
+                if (t->stack[t->sp] == n->max) { t->sp++; goto parent; }
+
+                // Normal op .. inc if under absolute max
+                if (t->stack[t->sp] < NO_MAX) t->stack[t->sp]++;
                 
-                default:
-                    fprintf(stderr, "unknown node op=%d (id=%d)\n", n->op, NODE_ID(ctx, n));
+                // If we haven't hit min, then do b again...
+                if (t->stack[t->sp] <= n->min) goto leg_b;
+
+                // We must have hit min, so need to spawn...
+                if (n->lazy) {
+                    t->next = task_new(ctx, t, t->next, n, n->b);
+                    t->n = n->parent;
+                    t->sp++;        // parent
+                } else {
+                    t->next = task_new(ctx, t, t->next, n, n->parent);
+                    t->next->sp++;  // parent
+                    t->n = n->b;
+                }
+                t->last = n;
+                continue;
+            }
+
+            // We always match a LF on either go around, but if not and we come from above then we must
+            // match a CR and go again. On the second time around if doesn't matter if we don't match.
+            if (n->op == OP_CRLF) {
+                if (ch == 10) {
+                    t->last = n;
+                    t->n = n->parent;
+                    goto next;
+                }
+                if (t->last == n->parent) {
+                    if (ch == 13) {
+                        // Stay here for another go...
+                        t->last = n;
+                        goto next;
+                    }
                     goto die;
+                }
+                goto parent;
+            }                    
 
 // Reused outcomes for the different operations...
 
@@ -1063,18 +1111,12 @@ next:               prev = t;
 
 die:                if (prev) {
                         prev->next = t->next; task_release(ctx, t); t = prev->next;
-                    } else {
-                        run_list = t->next; task_release(ctx, t); t = run_list; continue;
                         continue;
-                        goto tasks_done;
-                        t = run_list;
-                        // Run out of tasks for this go...
-                        break;
+                    } else {
+                        run_list = t->next; task_release(ctx, t); t = run_list;
+                        continue;
                     }
-                    continue;
-            }
         }
-tasks_done:
         p++;
     } while(p <= end);
 
@@ -1085,9 +1127,7 @@ done:
     // Move any tasks left on the run-list into the free list
     while (run_list) { struct task *x = run_list->next; task_release(ctx, run_list); run_list = x; }
 
-//    if (!(flags & F_KEEP_TASKS)) {
-//        while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
-//    }
+    // And return status...
     if (ctx->done) return 1;
     return 0;
 }
@@ -1103,7 +1143,6 @@ char *opmap(uint8_t op) {
         case OP_CONCAT:     return "CONCAT";
         case OP_PLUS:       return "PLUS";
         case OP_STAR:       return "STAR";
-        case OP_NOP:        return "NOP";
         case OP_QUESTION:   return "QUESTION";
         case OP_ALTERNATE:  return "ALTERNATE";
         case OP_DONE:       return "DONE";
@@ -1206,7 +1245,7 @@ bonly:
     }
 }
 
-void export_tree(struct rectx *ctx, const char *filename) {
+void rele_export_tree(struct rectx *ctx, const char *filename) {
     FILE *f = fopen(filename, "w");
     fprintf(f, "digraph tree {\n");
     dump_dot(ctx, ctx->root, f);

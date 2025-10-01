@@ -161,3 +161,13 @@ N:greedymatch
 xxaxxxxaaxxxxxaaaxxxxx
 0: 2,3
 
+N:hex1
+/\x41
+xxAbb
+0:2,3
+
+N:hex2
+/\x5a42x
+xxZ42xabbc
+0:2,6
+

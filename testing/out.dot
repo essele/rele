@@ -1,0 +1,85 @@
+digraph tree {
+    n0xbbc86bbf2710 [label="(20)
+CONCAT
+"];
+    n0xbbc86bbf2710 -> n0xbbc86bbf2490 [label="a"];
+    n0xbbc86bbf2490 [label="(0)
+GROUP
+0"];
+    n0xbbc86bbf2490 -> n0xbbc86bbf24f0 [label="b"];
+    n0xbbc86bbf24f0 [label="(3)
+CONCAT
+"];
+    n0xbbc86bbf24f0 -> n0xbbc86bbf24b0 [label="a"];
+    n0xbbc86bbf24b0 [label="(1)
+ANCHOR
+'^'"];
+    n0xbbc86bbf24f0 -> n0xbbc86bbf2550 [label="b"];
+    n0xbbc86bbf2550 [label="(6)
+CONCAT
+"];
+    n0xbbc86bbf2550 -> n0xbbc86bbf24d0 [label="a"];
+    n0xbbc86bbf24d0 [label="(2)
+GROUP
+1"];
+    n0xbbc86bbf24d0 -> n0xbbc86bbf2510 [label="b"];
+    n0xbbc86bbf2510 [label="(4)
+MATCH
+'.'"];
+    n0xbbc86bbf2550 -> n0xbbc86bbf25b0 [label="b"];
+    n0xbbc86bbf25b0 [label="(9)
+CONCAT
+"];
+    n0xbbc86bbf25b0 -> n0xbbc86bbf2530 [label="a"];
+    n0xbbc86bbf2530 [label="(5)
+GROUP
+2"];
+    n0xbbc86bbf2530 -> n0xbbc86bbf2570 [label="b"];
+    n0xbbc86bbf2570 [label="(7)
+MATCH
+'.'"];
+    n0xbbc86bbf25b0 -> n0xbbc86bbf2610 [label="b"];
+    n0xbbc86bbf2610 [label="(12)
+CONCAT
+"];
+    n0xbbc86bbf2610 -> n0xbbc86bbf2590 [label="a"];
+    n0xbbc86bbf2590 [label="(8)
+GROUP
+3"];
+    n0xbbc86bbf2590 -> n0xbbc86bbf25d0 [label="b"];
+    n0xbbc86bbf25d0 [label="(10)
+MATCH
+'.'"];
+    n0xbbc86bbf2610 -> n0xbbc86bbf2650 [label="b"];
+    n0xbbc86bbf2650 [label="(14)
+CONCAT
+"];
+    n0xbbc86bbf2650 -> n0xbbc86bbf25f0 [label="a"];
+    n0xbbc86bbf25f0 [label="(11)
+MATCHGRP
+3"];
+    n0xbbc86bbf2650 -> n0xbbc86bbf2690 [label="b"];
+    n0xbbc86bbf2690 [label="(16)
+CONCAT
+"];
+    n0xbbc86bbf2690 -> n0xbbc86bbf2630 [label="a"];
+    n0xbbc86bbf2630 [label="(13)
+MATCHGRP
+2"];
+    n0xbbc86bbf2690 -> n0xbbc86bbf26d0 [label="b"];
+    n0xbbc86bbf26d0 [label="(18)
+CONCAT
+"];
+    n0xbbc86bbf26d0 -> n0xbbc86bbf2670 [label="a"];
+    n0xbbc86bbf2670 [label="(15)
+MATCHGRP
+1"];
+    n0xbbc86bbf26d0 -> n0xbbc86bbf26b0 [label="b"];
+    n0xbbc86bbf26b0 [label="(17)
+ANCHOR
+'$'"];
+    n0xbbc86bbf2710 -> n0xbbc86bbf26f0 [label="b"];
+    n0xbbc86bbf26f0 [label="(19)
+DONE
+"];
+}

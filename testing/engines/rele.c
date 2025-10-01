@@ -8,6 +8,7 @@ struct rectx *rele_ctx;
 int librele_compile(char *regex) {
     rele_ctx = rele_compile(regex, 0);
     if (!rele_ctx) return 0;
+    //rele_export_tree(rele_ctx, "out.dot");
     return 1;
 }
 int librele_match(char *text) {

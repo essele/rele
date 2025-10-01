@@ -1,5 +1,5 @@
 CC      = gcc
-CFLAGS  = -Wall -g -fPIC -pg
+CFLAGS  = -Wall -g -fPIC
 LDFLAGS = -ldl -pthread
 
 ENGINES	= libc.o rele.o pcre.o re2.o

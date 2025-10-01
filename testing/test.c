@@ -42,15 +42,30 @@ uint64_t timespec_to_ms(struct timespec t) {
 /**
  * Given a name, find the relevant test case...
  */
-const struct testcase *find_case(char *name) {
+int find_test_index(char *name) {
     const struct testcase *t;
     int i = 0;
 
     while ((t = cases[i])) {
-        if (strcmp((t)->name, name) == 0) return t;
+        if (strcmp((t)->name, name) == 0) return i;
         i++;
     }
-    return NULL;
+    return -1;
+}
+
+const struct testcase *find_named_test(char *name) {
+    int i = 0;
+    if (name) i = find_test_index(name);
+    if (i < 0) return NULL;
+    return cases[i];
+}
+
+const struct testcase *find_next_test(char *name) {
+    if (!name) return cases[0];
+
+    int i = find_test_index(name);
+    if (i < 0) return NULL;
+    return cases[i+1];
 }
 
 
@@ -117,17 +132,63 @@ int main(int argc, char *argv[]) {
     }
 
 
-    const struct testcase **tc = cases;
-    while (*tc)
-    {
-        const struct testcase *t = *tc;
-        // OK, main memory_wrapped code starts here...
+    // OK, lets do some rudimentary command line parsing...
 
+    char    *cf_test = "all";
+    char    *cf_engine = "all";
+    int     cf_show_matches = 0;
 
-//        t = find_case("exponential");
+    int args = argc;
+    char **ap = &argv[1];
+    while (args && *ap) {
+        char *arg = *ap;
+        fprintf(stderr, "Arg is: %s\n", *ap);
+        
+        if (strcmp(arg, "-t") == 0 && args > 1) {
+            cf_test = *++ap;
+        } else if (strcmp(arg, "-e") == 0 && args > 1) {
+            cf_engine = *++ap;
+        } else if (strcmp(arg, "-r") == 0) {
+            cf_show_matches = 1;
+        }
+        ap++;
+        args--;
+    }
 
+    fprintf(stderr, "cf_test = %s\n", cf_test);
+    fprintf(stderr, "cf_engine = %s\n", cf_engine);
+    fprintf(stderr, "cf_show_results = %d\n", cf_show_matches);
 
-    //    const struct testcase *t = cases[0];
+    char *test_name = NULL;
+    char *tnp = cf_test;
+
+    // Ok, here is the test-case loop...
+    while (1) {
+        const struct testcase *t;
+        
+        // If we have one or more test specified then we need to find them...
+        // Need to find a nicer way, this is awful!
+        if (strcmp(cf_test, "all") != 0) {
+            char    tn[128];
+            while (*tnp == ',') tnp++;      // in case of double comma etc
+            if (!*tnp) break;                        // no more left
+            for (int i=0; i < 128; i++) {
+                tn[i] = *tnp++;
+                if (tn[i] == ',') { tn[i] = 0; break; }
+                if (tn[i] == 0) { tnp--; }
+            }
+            fprintf(stderr, "test name is %s\n", tn);
+            t = find_named_test(tn);
+            if (!t) break;
+        } else {
+            t = find_next_test(test_name);
+            if (!t) break;
+        }
+        // If we are looking at all tests, then get the next one...
+
+        test_name = t->name;
+        fprintf(stderr, "Test Case is: %s\n", test_name);
+
         fprintf(stderr, "Name: %s\n", t->name);
         fprintf(stderr, "Regex: %s\n", t->regex);
         fprintf(stderr, "Text: %s\n", t->text);
@@ -160,7 +221,11 @@ int main(int argc, char *argv[]) {
                 err = TEST_GROUPNO_WRONG;
                 goto do_free;
             }
-            for (int i = 0; i < rg; i++) {
+            for (int i = 0; i < t->groups; i++) {
+                if (cf_show_matches) {
+                    fprintf(stderr, "R: %d -> %d, %d  -- GOT: %d, %d\n", i, t->res[i].so, t->res[i].eo,
+                                                                e->res_so(i), e->res_eo(i));
+                }
 //                fprintf(stderr, "R: %d -> %d, %d\n", i, e->res_so(i), e->res_eo(i));
                 if (t->res[i].so != e->res_so(i) || t->res[i].eo != e->res_eo(i)) {
                     err = TEST_RESULTS_WRONG;
@@ -198,7 +263,7 @@ int main(int argc, char *argv[]) {
 
             es++;
         }
-        tc++;
+        //tc++;
     }
 
 //    int used = stack_usage();

@@ -27,6 +27,6 @@ void rele_free(struct rectx *ctx);
 int rele_match_count(struct rectx *ctx);
 struct rele_match_t *rele_get_match(struct rectx *ctx, int n);
 
-void export_tree(struct rectx *ctx, const char *filename);
+void rele_export_tree(struct rectx *ctx, const char *filename);
 
 #endif
