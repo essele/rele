@@ -102,7 +102,7 @@ extern "C" {
 
     #include "../test.h"
 
-    struct relib funcs_re2 = {
+    struct engine funcs_re2 = {
         .name = (char *)"re2",
         .compile = re2_compile,
         .match = re2_match,

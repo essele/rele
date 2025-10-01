@@ -109,6 +109,8 @@ def do_hex(s):
 
 cases = build_cases()
 
+# print(cases)
+
 with open('test_cases.c','w') as outfile:
     with redirect_stdout(outfile):
 

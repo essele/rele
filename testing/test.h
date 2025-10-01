@@ -1,6 +1,6 @@
 
 
-struct relib {
+struct engine {
     char    *name;
     int     (*compile)(char *regex);
     int     (*match)(char *text);

@@ -1,7 +1,7 @@
 /**
  * Sample code for the rele implementation (will need to move to a separate file)
  */
-#include "../../librele/rele.h"
+#include "../../librele/librele.h"
 #include "../test.h"
 struct rectx *rele_ctx;
 
@@ -11,8 +11,8 @@ int librele_compile(char *regex) {
     return 1;
 }
 int librele_match(char *text) {
-    rele_match(rele_ctx, text, 0, 0);
-    return 1;       // TODO
+    if (rele_match(rele_ctx, text, 0, 0)) return 1;
+    return 0;
 }
 int librele_res_count() {
     return rele_match_count(rele_ctx);
@@ -28,7 +28,7 @@ int librele_free() {
     return 1;
 }
 
-struct relib funcs_rele = {
+struct engine funcs_rele = {
     .name = "RELE",
     .compile = librele_compile,
     .match = librele_match,

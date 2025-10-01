@@ -740,6 +740,7 @@ int re_match(struct rectx *ctx, char *p, int len, int flags) {
         t = run_list;
         prev = NULL;
 
+
         if (!t) goto done;
 
         // Now for each task go through the binary tree until we get to
@@ -770,11 +771,23 @@ int re_match(struct rectx *ctx, char *p, int len, int flags) {
                     // If we have already completed at this index, then die...
                     if (ctx->done && ctx->done->p == p) goto die;
 
+                    // Free the previous candidate if there was one...
+                    if (ctx->done) task_release(ctx, ctx->done);
+
+                    if (run_list == t) {
+                        fprintf(stderr, "we are first\n");
+                        run_list = t->next;
+                        prev = NULL;
+
+                        t->next = NULL;
+                        t->p = p;
+                        ctx->done = t;
+                        goto done;
+                    }
+
                     // Remove ourselves from the running list...
                     if (prev) { prev->next = t->next; } else { run_list = t->next; prev = NULL; }
 
-                    // Free the previous candidate if there was one...
-                    if (ctx->done) task_release(ctx, ctx->done);
 
                     // Mark us as the candidate...
                     t->next = NULL;
@@ -1196,10 +1209,10 @@ if (0) {
 }
 //exit(0);
 
-    struct rectx *ctx = re_compile("abc", 0);
+    struct rectx *ctx = re_compile("a?a?a?aaa", 0);
     export_tree(ctx, "tree.dot");
 
-    char *string = "adsfjhasdfjhabcasdfajskdh";
+    char *string = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         
     int x = re_match(ctx, string, 0, 0 /*F_KEEP_TASKS*/);
     if (!ctx->done) {

@@ -1,5 +1,5 @@
 CC      = gcc
-CFLAGS  = -Wall -g -fPIC
+CFLAGS  = -Wall -g -fPIC -pg
 LDFLAGS = -ldl -pthread
 
 ENGINES	= libc.o rele.o pcre.o re2.o
@@ -12,6 +12,12 @@ engines: $(ENGINES:%=engines/%)
 
 
 #
+# The main rele code
+#
+librele.o: ../librele/librele_b.c
+	$(CC) $(CFLAGS) -O2 -c -o $@ $<
+
+#
 # Individual engines...
 #
 engines/%.o: engines/%.c
@@ -20,7 +26,7 @@ engines/%.o: engines/%.c
 engines/%.o: engines/%.cpp
 	g++ -c -o $@ $<
 
-test: test.o stack.o test_cases.o $(ENGINES:%=engines/%) ../librele/rele.o
+test: test.o stack.o test_cases.o $(ENGINES:%=engines/%) librele.o
 	g++ $(CFLAGS) -pthread $^ $(LDFLAGS) $(EXTRA_LIBS) -o $@ 
 
 # Main test program
@@ -40,4 +46,4 @@ test_cases.c: test_cases.txt
 
 # Clean up
 clean:
-	rm -f test memwrap.so test.o stack.o test_cases.o test_cases.c $(ENGINES:%=engines/%)
+	rm -f test memwrap.so test.o stack.o test_cases.o test_cases.c librele.o $(ENGINES:%=engines/%)

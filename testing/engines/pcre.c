@@ -40,7 +40,7 @@ int libpcre_free() {
     return 1;
 }
 
-struct relib funcs_pcre = {
+struct engine funcs_pcre = {
     .name = "PCRE2",
     .compile = libpcre_compile,
     .match = libpcre_match,

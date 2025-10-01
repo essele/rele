@@ -34,7 +34,7 @@ static int libc_free() {
     return 1;
 }
 
-struct relib funcs_libc = {
+struct engine funcs_libc = {
     .name = "libc",
     .compile = libc_compile,
     .match = libc_match,
