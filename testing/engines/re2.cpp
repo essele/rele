@@ -12,13 +12,23 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <iostream>
 
 
 // ---- internal state ----
 static RE2 *re2_regex = nullptr;
-static std::string re2_subject;                       // last matched subject
+//static std::string re2_subject;                       // last matched subject
+static re2::StringPiece re2_subject;
 static std::vector<re2::StringPiece> re2_subs;        // last captured submatches
 static int re2_ngroups = 0;                           // number of capturing groups
+
+static std::vector<re2::StringPiece> subs;            // reuse this across calls
+
+void print_piece(const re2::StringPiece& sp) {
+    std::cerr.write(sp.data(), sp.size());
+    std::cerr << " (len=" << sp.size() << ")\n";
+}
+
 
 static int re2_compile(char *pattern_c) {
     std::string pattern(pattern_c);
@@ -37,10 +47,26 @@ static int re2_compile(char *pattern_c) {
 
     // prepare storage for capture pieces
     re2_subs.resize(re2_ngroups); // subs[0] corresponds to the outer wrapper (full match)
+
+    re2_ngroups++;
     return 1;
 }
 
 static int re2_match(char *text) {
+    //re2_subject = std::string(text);
+    re2_subject = re2::StringPiece(text, strlen(text));
+
+    // Ensure we have enough capture slots (say 32)
+    if (subs.size() < 32)
+        subs.resize(32);
+
+    bool ok = re2_regex->Match(re2_subject, 0, re2_subject.size(), RE2::UNANCHORED, &subs[0], subs.size());
+    if (!ok) return 0;
+
+    return 1;
+}
+
+static int Xre2_match(char *text) {
     re2_subject = std::string(text);
     // re2::StringPiece needs to point to re2_subject data:
     re2::StringPiece subject_sp(re2_subject);
@@ -48,17 +74,19 @@ static int re2_match(char *text) {
     re2_ngroups++;
 
     // prepare a temporary vector (will be filled by RE2::Match)
-    std::vector<re2::StringPiece> tmp;
-    tmp.resize(re2_ngroups);
+//    std::vector<re2::StringPiece> tmp;
+//    tmp.resize(re2_ngroups);
 
+//    if (! re2_regex->Match(subject_sp, 0, re2_subject.size(),
+//                               RE2::UNANCHORED, tmp.data(), static_cast<int>(tmp.size()))) {
     if (! re2_regex->Match(subject_sp, 0, re2_subject.size(),
-                               RE2::UNANCHORED, tmp.data(), static_cast<int>(tmp.size()))) {
+                               RE2::UNANCHORED, re2_subs.data(), static_cast<int>(re2_subs.size()))) {
         // no match
-        re2_subs.clear();
+        //re2_subs.clear();
         return 0;
-    }       
+    }
     // copy tmp into persistent re2_subs
-    re2_subs = tmp;
+//    re2_subs = tmp;
     return 1;
 }
 
@@ -69,8 +97,16 @@ static int re2_res_count() {
     return re2_ngroups;
 }
 
+int re2_res_so(int i) {
+    return subs[i].data() ? subs[i].data() - re2_subject.data() : -1;
+}
+
+int re2_res_eo(int i) {
+    return subs[i].data() ? (subs[i].data() - re2_subject.data() + subs[i].size()) : -1;
+}
+
 // start offset of group `res` (POSIX-style: 0=full match, 1..n = subgroups)
-static int re2_res_so(int res) {
+static int Xre2_res_so(int res) {
     if (re2_subs.empty()) return -1;
     if (res < 0 || res >= (int)re2_subs.size()) return -1;
     re2::StringPiece &sp = re2_subs[res];
@@ -80,7 +116,7 @@ static int re2_res_so(int res) {
 }
 
 // end offset (one past last character) of group `res`
-static int re2_res_eo(int res) {
+static int Xre2_res_eo(int res) {
     if (re2_subs.empty()) return -1;
     if (res < 0 || res >= (int)re2_subs.size()) return -1;
     re2::StringPiece &sp = re2_subs[res];
@@ -92,7 +128,7 @@ static int re2_res_eo(int res) {
 static int re2_free() {
     delete re2_regex;
     re2_regex = nullptr;
-    re2_subject.clear();
+    //re2_subject.clear();
     re2_subs.clear();
     re2_ngroups = 0;
     return 1;

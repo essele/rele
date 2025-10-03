@@ -3,6 +3,8 @@
 import os
 import sys
 import re
+import random
+import string
 from contextlib import redirect_stdout
 
 print("Hello")
@@ -35,6 +37,38 @@ def build_cases():
             if line[:2] == "D:":
                 case["desc"] = line[2:]
                 continue
+
+            # Expected failure scenario
+            if line[:2] == "E:":
+                case["error"] = line[2:]
+                continue
+
+            if line[:2] == "I:":
+                case["iter"] = line[2:]
+                continue
+
+            # Generate some text
+            if line[:4] == "GEN:":
+                match = re.match('(.*),(\\d+)(K?)', line[4:])
+                if (match):
+                    if match.group(1) == "random":
+                        count = int(match.group(2))
+                        if (match.group(3)):
+                            count *= 1024
+
+                        x = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=count))
+                        print(len(x))
+                        if "text" in case:
+                            case["text"] += "\n" + x
+                        else:
+                            case["text"] = x
+                        continue
+                    else:
+                        print("Unknown gen type: " + match.group[1])
+                        sys.exit(0)
+                else:
+                    print("MALFORMED GEN LINE\n")
+                    sys.exit()
 
             # Result
             match = re.match('^(\\d+):\\s*(\\-?\\d+),\\s*(\\-?\\d+)', line)
@@ -137,6 +171,14 @@ with open('test_cases.c','w') as outfile:
             print(F"\t.text = (char *)text_{num}," )
             #print(F"\t.text = {{ {do_hex(case["text"])} }},")
             print(F"\t.groups = {len(case["res"])}," )
+            if ("error" in case):
+                print(F"\t.error = E_{case["error"]},")
+            else:
+                print(F"\t.error = E_OK,")
+            if ("iter" in case):
+                print(F"\t.iter = {case["iter"]},")
+            else:
+                print(F"\t.iter = 100000,")
 
             out = "\t.res = { " + ", ".join(f"{{ {a}, {b} }}" for a, b in case["res"]) + " },"
             print(out)

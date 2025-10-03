@@ -14,7 +14,7 @@ engines: $(ENGINES:%=engines/%)
 #
 # The main rele code
 #
-librele.o: ../librele/librele_b.c
+librele.o: ../librele/librele_c.c
 	$(CC) $(CFLAGS) -O2 -c -o $@ $<
 
 #

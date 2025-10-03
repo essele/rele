@@ -28,6 +28,10 @@ int librele_free() {
     rele_free(rele_ctx);
     return 1;
 }
+int librele_tree() {
+    rele_export_tree(rele_ctx, "tree.dot");
+    return 1;
+}
 
 struct engine funcs_rele = {
     .name = "RELE",
@@ -37,4 +41,5 @@ struct engine funcs_rele = {
     .res_so = librele_res_so,
     .res_eo = librele_res_eo,
     .free = librele_free,
+    .tree = librele_tree,
 };

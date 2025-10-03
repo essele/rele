@@ -8,11 +8,17 @@ struct engine {
     int     (*res_so)(int res);
     int     (*res_eo)(int res);
     int     (*free)();
+    int     (*tree)();
 };
 
 struct result {
     int     so;
     int     eo;
+};
+
+enum {
+    E_OK = 0,
+    E_MATCHFAIL,
 };
 
 /*
@@ -25,6 +31,8 @@ struct testcase {
     char *text;
     int rc;
     int groups;
+    int error;                  // expected errors
+    int iter;                   // how many iterations
     struct result res[];
 };
 

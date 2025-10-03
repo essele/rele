@@ -37,6 +37,9 @@ struct timespec diff_timespec(struct timespec start, struct timespec end) {
 uint64_t timespec_to_ms(struct timespec t) {
     return t.tv_sec * 1000 + t.tv_nsec / 1000000;
 }
+uint64_t timespec_to_us(struct timespec t) {
+    return t.tv_sec * 1000000 + t.tv_nsec / 1000;
+}
 
 
 /**
@@ -137,6 +140,7 @@ int main(int argc, char *argv[]) {
     char    *cf_test = "all";
     char    *cf_engine = "all";
     int     cf_show_matches = 0;
+    int     cf_build_tree = 0;
 
     int args = argc;
     char **ap = &argv[1];
@@ -150,6 +154,8 @@ int main(int argc, char *argv[]) {
             cf_engine = *++ap;
         } else if (strcmp(arg, "-r") == 0) {
             cf_show_matches = 1;
+        } else if (strcmp(arg, "-tree") == 0) {
+            cf_build_tree = 1;
         }
         ap++;
         args--;
@@ -161,6 +167,19 @@ int main(int argc, char *argv[]) {
 
     char *test_name = NULL;
     char *tnp = cf_test;
+
+    // TEMPORARY FOR DEBUGGING
+    if (cf_build_tree) {
+        const struct testcase *t = find_named_test(cf_test);
+        if (!t) { fprintf(stderr, "no test found\n"); exit (1); }
+
+        funcs_rele.compile(t->regex);
+        fprintf(stderr, "Building tree\n");
+
+        funcs_rele.tree();
+        exit(0);
+    }
+
 
     // Ok, here is the test-case loop...
     while (1) {
@@ -191,12 +210,17 @@ int main(int argc, char *argv[]) {
 
         fprintf(stderr, "Name: %s\n", t->name);
         fprintf(stderr, "Regex: %s\n", t->regex);
-        fprintf(stderr, "Text: %s\n", t->text);
+        fprintf(stderr, "Iterations: %d\n", t->iter);
+        if (strlen(t->text) > 100) {
+            fprintf(stderr, "Text: (long, %d chars)\n", (int)strlen(t->text));
+        } else {
+            fprintf(stderr, "Text: %s\n", t->text);
+        }
 
         struct engine **es = engines;
         while (*es) {
             struct engine *e = *es;
-            struct timespec start, end;
+            struct timespec start, compile, end;
             struct memstats mem;
             int used = 0;
 
@@ -206,6 +230,10 @@ int main(int argc, char *argv[]) {
             memstats_zero();
             stack_fill();
 
+            // Stage 1 -- do compile, match, and check results
+            //
+            // If the match fails we still do the timings and memory stuff
+            // to ensure we know how long these things take
 
             if (!e->compile(t->regex)) {
                 err = TEST_COMPILE_FAIL;
@@ -213,6 +241,7 @@ int main(int argc, char *argv[]) {
             }
             if (!e->match(t->text)) {
                 err = TEST_MATCH_FAIL;
+                if (t->error == E_MATCHFAIL) goto timings;
                 goto do_free;
             }
 
@@ -229,18 +258,25 @@ int main(int argc, char *argv[]) {
 //                fprintf(stderr, "R: %d -> %d, %d\n", i, e->res_so(i), e->res_eo(i));
                 if (t->res[i].so != e->res_so(i) || t->res[i].eo != e->res_eo(i)) {
                     err = TEST_RESULTS_WRONG;
-                    goto do_free;
+//                    goto timings;
                 }
             }
 
+timings:
             memcpy(&mem, memstats_get(), sizeof(struct memstats));
             used = stack_usage();
 
+            e->free();
+            
             // If we are successful, then lets try some timing tests...
             clock_gettime(CLOCK_MONOTONIC, &start);
-            for (int i=0; i < 100000; i++) {
-                e->free();
+            for (int i=0; i < t->iter; i++) {
                 e->compile(t->regex);
+                e->free();
+            }
+            e->compile(t->regex);
+            clock_gettime(CLOCK_MONOTONIC, &compile);
+            for (int i=0; i < t->iter; i++) {
                 e->match(t->text);
             }
             clock_gettime(CLOCK_MONOTONIC, &end);
@@ -253,9 +289,12 @@ int main(int argc, char *argv[]) {
     done:
             //mem = memstats_get();
 
-            fprintf(stderr, "\t%s -> %s (stack=%d, mem=%d, allocs=%d) [time=%dms]\n", e->name, errors[err], used, 
+            fprintf(stderr, "\t%s -> %s (stack=%d, mem=%d, allocs=%d) [compile_time=%dms, match_time=%dms, tot=%dms]\n", e->name, errors[err], used, 
                         (int)mem.total_allocated, (int)mem.total_allocs,
-                        (int)timespec_to_ms(diff_timespec(start, end)));
+                        (int)timespec_to_ms(diff_timespec(start, compile)),
+                        (int)timespec_to_ms(diff_timespec(compile, end)),
+                        (int)timespec_to_ms(diff_timespec(start, end))
+            );
 
     //        fprintf(stderr, "Status: %s\n", errors[err]);
     //        fprintf(stderr, "Used stack = %d\n", used);
