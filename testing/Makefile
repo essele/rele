@@ -1,8 +1,9 @@
 CC      = gcc
-CFLAGS  = -Wall -g -fPIC --stack-usage -fdebug-prefix-map=/=
+CFLAGS  = -Wall -g
 LDFLAGS = -ldl -pthread
 
-ENGINES	= libc.o rele.o pcre.o re2.o
+ENGINES	= libc.o rele.o pcre.o re2.o tiny-rc.o subr.o
+EXTRAS = engines/ex-tinyrc.o engines/ex-subr.o
 EXTRA_LIBS = -lpcre2-8 -lre2 -labsl_string_view
 
 # Targets
@@ -12,10 +13,18 @@ engines: $(ENGINES:%=engines/%)
 
 
 #
-# The main rele code
+# Librele special case
 #
 librele.o: ../librele/librele_c.c
 	$(CC) $(CFLAGS) -O2 -c -o $@ $<
+
+#
+# Extra objects...
+#
+engines/ex-tinyrc.o: engines/tiny-regex-c/re.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+engines/ex-subr.o: engines/subreg/subreg.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 #
 # Individual engines...
@@ -26,7 +35,7 @@ engines/%.o: engines/%.c
 engines/%.o: engines/%.cpp
 	g++ -c -o $@ $<
 
-test: test.o stack.o test_cases.o $(ENGINES:%=engines/%) librele.o
+test: test.o stack.o test_cases.o $(ENGINES:%=engines/%) librele.o ${EXTRAS}
 	g++ $(CFLAGS) -pthread $^ $(LDFLAGS) $(EXTRA_LIBS) -o $@ 
 
 # Main test program
@@ -35,7 +44,7 @@ test: test.o stack.o test_cases.o $(ENGINES:%=engines/%) librele.o
 
 # The memory wrapper shared library
 memwrap.so: memwrap.c
-	$(CC) $(CFLAGS) -shared -o $@ $< $(LDFLAGS)
+	$(CC) $(CFLAGS) -fPIC -shared -o $@ $< $(LDFLAGS)
 
 #
 # Turn the textual test cases into a testcases.c file so that we can then build it

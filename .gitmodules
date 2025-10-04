@@ -1,0 +1,9 @@
+[submodule "testing/tiny-regex-c"]
+	path = testing/tiny-regex-c
+	url = https://github.com/kokke/tiny-regex-c.git
+[submodule "testing/engines/tiny-regex-c"]
+	path = testing/engines/tiny-regex-c
+	url = https://github.com/kokke/tiny-regex-c.git
+[submodule "testing/engines/subreg"]
+	path = testing/engines/subreg
+	url = https://github.com/mattbucknall/subreg.git

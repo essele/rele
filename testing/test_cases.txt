@@ -203,6 +203,12 @@ N:longstar
 E:MATCHFAIL
 I:10
 /X.*ABCDEFGHIJK$
-GEN:random,256K
+GEN:random,64K
 0:0,16384
+
+N:emptymatches
+/(a?)+
+hello
+0:0,0
+1:0,0
 

@@ -1,7 +1,0 @@
-test.c:24:17:diff_timespec	48	static
-test.c:37:10:timespec_to_ms	16	static
-test.c:40:10:timespec_to_us	16	static
-test.c:48:5:find_test_index	48	static
-test.c:59:24:find_named_test	48	static
-test.c:66:24:find_next_test	48	static
-test.c:103:5:main	464	static

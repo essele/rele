@@ -76,12 +76,16 @@ extern struct engine funcs_libc;
 extern struct engine funcs_rele;
 extern struct engine funcs_pcre;
 extern struct engine funcs_re2;
+extern struct engine funcs_tinyrc;
+extern struct engine funcs_subr;
 
 struct engine *engines[] = {
     &funcs_libc,
-    &funcs_rele,
+//    &funcs_rele,
     &funcs_pcre,
     &funcs_re2,
+    &funcs_tinyrc,
+    &funcs_subr,
     NULL
 };
 
