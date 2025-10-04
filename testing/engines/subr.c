@@ -4,15 +4,12 @@
 #include "../test.h"
 
 #define SUBR_MAX_GROUPS     10
-subreg_capture_t      captures[SUBR_MAX_GROUPS];
-int 	capture_count;
+static subreg_capture_t      captures[SUBR_MAX_GROUPS];
+static int 	capture_count;
 
-char	last_regex[1024];		// to adjust for ^ and $
+static char	last_regex[1024];		// to adjust for ^ and $
 
-char 	*last_input;			// to keep for later!
-
-int subreg_match(const char* regex, const char* input, subreg_capture_t captures[],
-    unsigned int max_captures, unsigned int max_depth);
+static char 	*last_input;			// to keep for later!
 
 static int subr_compile(char *regex) {
 	strcpy(last_regex, regex);

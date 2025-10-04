@@ -78,14 +78,18 @@ extern struct engine funcs_pcre;
 extern struct engine funcs_re2;
 extern struct engine funcs_tinyrc;
 extern struct engine funcs_subr;
+extern struct engine funcs_slre;
+extern struct engine funcs_tre;
 
 struct engine *engines[] = {
     &funcs_libc,
-//    &funcs_rele,
+    &funcs_rele,
     &funcs_pcre,
     &funcs_re2,
     &funcs_tinyrc,
     &funcs_subr,
+    &funcs_slre,
+    &funcs_tre,
     NULL
 };
 
@@ -252,6 +256,7 @@ int main(int argc, char *argv[]) {
             int rg = e->res_count();
             if (rg != t->groups) {
                 err = TEST_GROUPNO_WRONG;
+                fprintf(stderr, "Groups Expected: %d got: %d\n", t->groups, rg);
                 goto do_free;
             }
             for (int i = 0; i < t->groups; i++) {

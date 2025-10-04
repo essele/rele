@@ -7,10 +7,10 @@
 #include <stdio.h>
 #include "../test.h"
 
-pcre2_code *pcre_code;
-pcre2_match_data *match_data;
-int errornumber;
-PCRE2_SIZE erroroffset;
+static pcre2_code *pcre_code;
+static pcre2_match_data *match_data;
+static int errornumber;
+static PCRE2_SIZE erroroffset;
 
 int libpcre_compile(char *regex) {
     pcre_code = pcre2_compile((PCRE2_SPTR8)regex, PCRE2_ZERO_TERMINATED, 0, &errornumber, &erroroffset, NULL); 

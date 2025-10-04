@@ -67,6 +67,9 @@ struct node {
     uint8_t             op;             // which operation?
     uint8_t             lazy;           // won't fit in a with minmax
     // Two bytes unused here (if 32bit)
+
+    // An extra pointers here to allow us to detect zero length matches
+    char                *last_p;        // position of p when it last hit
 };
 
 // Where we have nodes that don't need children we need to mark the
@@ -940,11 +943,43 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                 goto die;
             }
 
+            // PROBLEM....
+            //
+            // If we have a + or * or a {x,MAX} then we have unbounded task creation.
+            // If the match is zero length (a? or \b or ^ or something) then we have
+            // infinite task creation (or unbounded, more than we need!)
+            //
+            // At + 
+            //    when we come back up, meaning we did match, if p is still the
+            //    same as it was when we went down then it's a zero match meaning
+            //    that we don't spawn a new task, we just let this one carry on up.
+            //
+            //    if lazy, then the spawn will have happened when we got here,
+            //    therefore a zero length match can just die.
+            //
+            //
+            // So how do we know .. when entering a plus, we store the task in the
+            // tree structure, perhaps along with p.
+            // When we get back, if the task and p are the same then it was a zero
+            // match.
+            //
+            // Means more bytes in the node, but potentially we can take four out
+            // of the task for ghostmatch.
+            //
+            //
+
+
+
             // If we get here from above, then go down the b leg. If we get here
             // from b, then it was successful and we spawn. Who goes where depends
             // on if we are lazy or not...
             if (n->op == OP_PLUS) {
-                if (t->last == n->parent) goto leg_b;
+                if (t->last == n->parent) {
+                    n->last_p = p;
+                    goto leg_b;
+                }
+                if (n->last_p == p) goto parent;    // zero length match
+                n->last_p = p;
                 goto new_b_or_parent;
             }
 
@@ -957,7 +992,16 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
             // If we hit from above then spawn to go right back up (zero) and from
             // b we do the same.
-            if (n->op == OP_STAR) goto new_b_or_parent;
+            // TODO: zero length match support
+            if (n->op == OP_STAR) {
+                if (t->last == n->parent) {
+                    n->last_p = p;
+                } else {
+                    if (n->last_p == p) goto parent;    // zero length match
+                    n->last_p = p;
+                }
+                goto new_b_or_parent;
+            }
 
 from_GROUP:
             // If we hit an empty group, then make sure we haven't just hit it,
@@ -1108,6 +1152,10 @@ from_GROUP:
 
             // If we come from above then get a new stack position and init, otherwise
             // count until we hit min, then spawn until max...
+            //
+            // TODO: zero length match support -- any zero length match is considered
+            // to have met the requirement.
+            // Need to ensure that a zero min doesn't get killed. Check from coming from b.
             if (n->op == OP_MULT) {
                 if (t->last == n->parent) {
                     if (t->sp == 0) {
@@ -1117,7 +1165,15 @@ from_GROUP:
                     }
                     t->sp--;
                     t->stack[t->sp] = 0;
+                    n->last_p = p;
                 }
+                // If we come from below and have a zero length, then
+                // we can consider this all done.
+                if (t->last == n->b) {
+                    if (n->last_p == p) { t->sp++; goto parent; }
+                    n->last_p = p;
+                }
+
                 // If we've hit max, then go back up...
                 if (t->stack[t->sp] == n->max) { t->sp++; goto parent; }
 

@@ -5,8 +5,8 @@
 #include <regex.h>
 
 #define LIBC_MAX_GROUPS     10
-regex_t         libc_regex;
-regmatch_t      pmatch[LIBC_MAX_GROUPS];
+static regex_t         libc_regex;
+static regmatch_t      pmatch[LIBC_MAX_GROUPS];
 
 static int libc_compile(char *regex) {
     if (regcomp(&libc_regex, regex, REG_EXTENDED)) {

@@ -2,9 +2,9 @@ CC      = gcc
 CFLAGS  = -Wall -g
 LDFLAGS = -ldl -pthread
 
-ENGINES	= libc.o rele.o pcre.o re2.o tiny-rc.o subr.o
-EXTRAS = engines/ex-tinyrc.o engines/ex-subr.o
-EXTRA_LIBS = -lpcre2-8 -lre2 -labsl_string_view
+ENGINES	= libc.o rele.o pcre.o re2.o tiny-rc.o subr.o slre.o tre.o
+EXTRAS = engines/ex-tinyrc.o engines/ex-subr.o engines/ex-slre.o
+EXTRA_LIBS = -lpcre2-8 -lre2 -labsl_string_view -ltre
 
 # Targets
 all: test memwrap.so
@@ -24,6 +24,8 @@ librele.o: ../librele/librele_c.c
 engines/ex-tinyrc.o: engines/tiny-regex-c/re.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 engines/ex-subr.o: engines/subreg/subreg.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+engines/ex-slre.o: engines/slre/slre.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 #

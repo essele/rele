@@ -2,9 +2,9 @@
 #include "../test.h"
 
 
-re_t ctx;
-int offset;
-int	mlen;
+static re_t ctx;
+static int offset;
+static int	mlen;
 
 static int tinyrc_compile(char *regex) {
 	ctx = re_compile(regex);

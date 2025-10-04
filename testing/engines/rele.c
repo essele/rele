@@ -3,7 +3,7 @@
  */
 #include "../../librele/librele.h"
 #include "../test.h"
-struct rectx *rele_ctx;
+static struct rectx *rele_ctx;
 
 int librele_compile(char *regex) {
     rele_ctx = rele_compile(regex, 0);

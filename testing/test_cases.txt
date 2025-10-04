@@ -208,7 +208,48 @@ GEN:random,64K
 
 N:emptymatches
 /(a?)+
-hello
+hellob
 0:0,0
 1:0,0
+
+N:emptymatches2
+/(a?)+(b+)
+aaahellobbb
+0:8,11
+1:8,8
+2:8,11
+
+N:emptymatches3
+/(a?)+?(b+)
+bbb
+0:0,3
+1:0,0
+2:0,3
+
+#
+# This tests how a {min,max} group works with empty matches
+# everyone agrees that the last match should be the empty one
+# (which makes libc and re2 wrong below in my view!) but the
+# other aspect is memory allocations, this kills libc, and re2.
+#
+N:emptymatches4
+/(a?){3,16}xyz
+aaxyzaaa
+0:0,5
+1:2,2
+
+#
+# This one tests where the last match is from (a?), it's either
+# the second a (1,2), or an empty match at (2,2). libc and re2 do
+# the former, PCRE2 does the latter.
+#
+# Same with + or * 
+#
+N:emptymatches5
+/(a?)*xyz
+aaxyzaaa
+0:0,5
+1:2,2
+
+
 

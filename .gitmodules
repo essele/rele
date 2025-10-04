@@ -7,3 +7,9 @@
 [submodule "testing/engines/subreg"]
 	path = testing/engines/subreg
 	url = https://github.com/mattbucknall/subreg.git
+[submodule "testing/engines/slre"]
+	path = testing/engines/slre
+	url = https://github.com/cesanta/slre.git
+[submodule "testing/engines/tre"]
+	path = testing/engines/tre
+	url = https://github.com/laurikari/tre.git
