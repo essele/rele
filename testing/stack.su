@@ -1,0 +1,4 @@
+stack.c:11:6:stack_init_bounds	304	static
+stack.c:36:21:get_sp	16	static
+stack.c:55:6:stack_fill	32	static
+stack.c:62:8:stack_usage	32	static

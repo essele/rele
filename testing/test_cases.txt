@@ -199,4 +199,10 @@ I:10000
 GEN:random,256K
 0:0,16384
 
+N:longstar
+E:MATCHFAIL
+I:10
+/X.*ABCDEFGHIJK$
+GEN:random,256K
+0:0,16384
 

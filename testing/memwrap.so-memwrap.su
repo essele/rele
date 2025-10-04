@@ -1,0 +1,6 @@
+memwrap.c:20:6:memstats_zero	0	static
+memwrap.c:27:18:memstats_get	0	static
+usr/include/stdlib.h:672:14:malloc	48	static
+usr/include/stdlib.h:687:13:free	32	static
+usr/include/stdlib.h:675:14:calloc	48	static
+usr/include/stdlib.h:683:14:realloc	48	static

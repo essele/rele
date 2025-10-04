@@ -94,6 +94,8 @@ struct rectx {
     // Memory for nodes and sets will follow this...
 };
 
+#define NOT_FLAG(v, f)           (!(v & f))
+#define HAS_FLAG(v, f)           (v & f)
 
 #define NODE_ID(ctx, n)          (int)(((void *)n - ((void *)ctx + sizeof(struct rectx)))/sizeof(struct node))
 
@@ -183,6 +185,7 @@ static int tcount = 0;      // TODO: might want to remove and use #defined debug
  */
 int rele_match_count(struct rectx *ctx) { return ctx->groups; }
 struct rele_match_t *rele_get_match(struct rectx *ctx, int n) { return &(ctx->done->grp[n]); }
+struct rele_match_t *rele_get_matches(struct rectx *ctx) { return ctx->done->grp; }
 
 
 // -------------------------------------------------------------------------------
@@ -297,15 +300,21 @@ char *minmax(char *p, struct node *n) {
     uint16_t min = 0, max = 0;
     p++;                // get past '{'
 
-    // First check we have the required digit...
-    if (!isdigit((int)*p)) return NULL;
+    // First check we have the required digit or a comma
+    if (*p != ',' && !isdigit((int)*p)) return NULL;
 
     // Now work out the first number...
     while (isdigit((int)*p)) { min = (min * 10) + (*p++ - '0'); if (min > 1000) return NULL; }
 
+    // Leading zero check for min
+    if (*p == '0' && isdigit((int)*(p+1))) return NULL;
+
     if (*p == '}') { max = min; goto done; }        // An exact number
     if (*p++ != ',') return NULL;                   // Need a comma
     if (*p == '}') { max = NO_MAX; goto done; }     // No second number
+
+    // Leading zero check for max
+    if (*p == '0' && isdigit((int)*(p+1))) return NULL;
 
     // Now get the second number...
     while (isdigit((int)*p)) { max = (max * 10) + (*p++ - '0'); if (max > 1000) return NULL; }
@@ -391,6 +400,14 @@ struct node *fast_start(struct rectx *ctx) {
 
             case OP_MATCHSET:       return n;       // this should be fine
 
+            // For a star we only support a .* construct to avoid running
+            // the regex for each char.
+            case OP_STAR:  
+                if (n->b->op == OP_MATCH) {
+                    if (n->b->ch2 == '.') return n;
+                }
+                return NULL;
+
             case OP_GROUP:          n = n->b; continue;
 
             case OP_CONCAT:         n = n->a; continue;
@@ -406,7 +423,6 @@ struct node *fast_start(struct rectx *ctx) {
             case OP_DONE:
             case OP_MATCHGRP:
             case OP_QUESTION:
-            case OP_STAR:
                 return NULL;
 
             default:
@@ -708,7 +724,9 @@ star_plus_question:
     last = create_node_here(ctx, ctx->root, OP_DONE, NULL, NULL);
 
     // Run the optimisation check...
-    ctx->fast_start = fast_start(ctx);
+    if (NOT_FLAG(flags, F_NO_FASTSTART)) {
+        ctx->fast_start = fast_start(ctx);
+    }
     return ctx;
 
 fail:
@@ -720,7 +738,7 @@ fail:
 // -------------------------------------------------------------------------------
 // Simple matching with escapes and classes
 // -------------------------------------------------------------------------------
-int matchone(char s, char ch) {
+static int matchone(char s, char ch) {
     if (s == '.')   return 1;           // TODO: newlines and stuff
 
     switch(s) {
@@ -782,8 +800,8 @@ static void inline task_release(struct rectx *ctx, struct task *task) {
 }
 
 // Freeing the context is much simpler now since everything was allocated
-// in a block, also the tasks are freed after the match, so we only need
-// to worry about the successful one.
+// in a block, so we have tasks freeing, successful task freeing and then
+// the main block.
 void rele_free(struct rectx *ctx) {
     // If we have kept our tasks then they will still be in the free list...
     while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
@@ -793,28 +811,15 @@ void rele_free(struct rectx *ctx) {
     free(ctx);
 }
 
-// TODO: might be quicker using a memcpy(a->grp, b->grp, ctx->groups * sizeof(struct xxx))
+// Compare the group structures between two tasks to see if they are the same
+// We can do this with memcmp which should be optimised by the compiler given
+// they are word-wide comparisons.
 static inline int has_same_groups(struct rectx *ctx, struct task *a, struct task *b) {
-    /*
-    int32_t *pa = (int32_t *)a->grp;
-    int32_t *pb = (int32_t *)b->grp;
-    int i = ctx->groups * 2;
-    while (i--) {
-        if (*pa++ != *pb++) return 0;
-    }
-    return 1;
-    */
-    /*
-    for (int i=0; i < ctx->groups; i++) {
-        if (a->grp[i].rm_so != b->grp[i].rm_so) return 0;
-        if (a->grp[i].rm_eo != b->grp[i].rm_eo) return 0;
-    }
-    return 1;
-    */
     if (memcmp(a->grp, b->grp, ctx->groups * sizeof(struct rele_match_t)) == 0) return 1;
     return 0;
 }
 
+// Compare the stack (including sp) on two tasks to see if they are the same
 static inline int has_same_stack(struct rectx *ctx, struct task *a, struct task *b) {
     if (a->sp != b->sp) return 0;
     for (int i=a->sp; i < TASK_STACK_SIZE; i++) {
@@ -862,6 +867,8 @@ int rele_match(struct rectx *ctx, char *p, int len, int flags) {
                 }
                 p++;
             }
+        } else if (n->op == OP_STAR) {
+            if (rele_match_iter(ctx, start, p, end, flags)) return 1;
         } else {
             fprintf(stderr, "WEIRD FAST START\n");
         }
@@ -872,10 +879,9 @@ int rele_match(struct rectx *ctx, char *p, int len, int flags) {
         }
     }
 
-    if (!(flags & F_KEEP_TASKS)) {
+    if (NOT_FLAG(flags, F_KEEP_TASKS)) {
         while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
     }
-
     return 0;
 }
 
@@ -895,9 +901,7 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
     // Keep track of the previous one so we can remove items
     struct task *prev = NULL;
-
     struct task *t;
-    struct set *set;
 
     do {
         // Get ready to run through for this char...
@@ -1059,8 +1063,7 @@ from_GROUP:
 
 
             if (n->op == OP_MATCHSET) {
-                set = (struct set *)n->set;
-                if (match_set(ch, set)) {
+                if (match_set(ch, n->set)) {
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
                     t->last = n;
                     t->n = n->parent;
@@ -1196,7 +1199,7 @@ die:                if (prev) {
 
 done:
     // Move any tasks left on the run-list into the free list
-    while (run_list) { struct task *x = run_list->next; task_release(ctx, run_list); run_list = x; }
+    while (run_list) { t = run_list->next; task_release(ctx, run_list); run_list = t; }
 
     // And return status...
     if (ctx->done) return 1;

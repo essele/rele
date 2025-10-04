@@ -1,5 +1,5 @@
 CC      = gcc
-CFLAGS  = -Wall -g -fPIC
+CFLAGS  = -Wall -g -fPIC --stack-usage -fdebug-prefix-map=/=
 LDFLAGS = -ldl -pthread
 
 ENGINES	= libc.o rele.o pcre.o re2.o

@@ -1,0 +1,6 @@
+engines/pcre.c:15:5:libpcre_compile	32	static
+engines/pcre.c:22:5:libpcre_match	48	static
+engines/pcre.c:26:5:libpcre_res_count	16	static
+engines/pcre.c:29:5:libpcre_res_so	48	static
+engines/pcre.c:33:5:libpcre_res_eo	48	static
+engines/pcre.c:37:5:libpcre_free	16	static

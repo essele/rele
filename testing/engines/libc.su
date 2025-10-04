@@ -1,0 +1,6 @@
+engines/libc.c:11:12:libc_compile	32	static
+engines/libc.c:18:12:libc_match	48	static
+engines/libc.c:23:12:libc_res_count	0	static
+engines/libc.c:26:12:libc_res_so	16	static
+engines/libc.c:29:12:libc_res_eo	16	static
+engines/libc.c:32:12:libc_free	16	static

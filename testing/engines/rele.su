@@ -1,0 +1,7 @@
+engines/rele.c:8:5:librele_compile	32	static
+engines/rele.c:14:5:librele_match	32	static
+engines/rele.c:18:5:librele_res_count	16	static
+engines/rele.c:21:5:librele_res_so	32	static
+engines/rele.c:24:5:librele_res_eo	32	static
+engines/rele.c:27:5:librele_free	16	static
+engines/rele.c:31:5:librele_tree	16	static
