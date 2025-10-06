@@ -11,7 +11,7 @@
 #include <stdio.h>      // remove, for debug only
 #include <ctype.h>
 
-#include "librele.h"
+#include "rele.h"
 
 // Include an ID in the nodes to help with debugging and tree visualisation
 #define DEBUG_ID    
@@ -779,7 +779,13 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
 
     if (from) {
         // Copy the stack and group matches...
-        memcpy(task->stack, from->stack, sizeof(task->stack));
+        //memcpy(task->stack, from->stack, sizeof(task->stack));
+        // I think we have memory alignment issues with the memcpy (which is weird!)
+        // Does seem to be the case on the 32bit qemu build!
+        for (int i=0; i < TASK_STACK_SIZE; i++) {
+            task->stack[i] = from->stack[i];
+        }
+
         memcpy(task->grp, from->grp, sizeof(struct rele_match_t) * ctx->groups);
         task->sp = from->sp;
         task->lastghostmatch = from->lastghostmatch;
@@ -1081,18 +1087,18 @@ from_GROUP:
                 t->lastghostmatch = n;
                 switch (n->ch1) {
                     case 'b':       if (p == start) {
-                                        if (isalnum(*p)) goto parent;
+                                        if (isalnum((int)*p)) goto parent;
                                     } else if (p == end) {
-                                        if (isalnum(p[-1])) goto parent;
-                                    } else if (isalnum(p[-1]) ^ isalnum(p[0])) {
+                                        if (isalnum((int)p[-1])) goto parent;
+                                    } else if (isalnum((int)p[-1]) ^ isalnum((int)p[0])) {
                                         goto parent;
                                     }
                                     goto die;
                     case 'B':       if (p == start) {
-                                        if (!isalnum(*p)) goto parent;
+                                        if (!isalnum((int)*p)) goto parent;
                                     } else if (p == end) {
-                                        if (!isalnum(p[-1])) goto parent;
-                                    } else if (!(isalnum(p[-1]) & isalnum(p[0]))) {
+                                        if (!isalnum((int)p[-1])) goto parent;
+                                    } else if (!(isalnum((int)p[-1]) & isalnum((int)p[0]))) {
                                         goto parent;
                                     }
                                     goto die;
@@ -1299,7 +1305,7 @@ void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
     fprintf(f, "    n%p [label=\"%s\n", (void *)n, opmap(n->op));
 #endif
 
-#define OUTC(c)     if(isprint(c)) { fprintf(f, "'%c'", c); } else { fprintf(f, "[0x%02x]", c); }
+#define OUTC(c)     if(isprint((int)c)) { fprintf(f, "'%c'", c); } else { fprintf(f, "[0x%02x]", c); }
 
     fprintf(stderr, "NODEID: %d.  OP=%d\n", NODE_ID(ctx, n), n->op);
 

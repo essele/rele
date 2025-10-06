@@ -251,5 +251,10 @@ aaxyzaaa
 0:0,5
 1:2,2
 
+N:broken
+/.*abc.*
+sometextwithabcinthemiddle
+0:0,26
+
 
 

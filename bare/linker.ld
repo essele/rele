@@ -11,6 +11,13 @@ _estack = ORIGIN(RAM) + LENGTH(RAM);    /* end of RAM */
 _stack_size = 0x8000;                    /* 16 KB stack */
 _stack_start = _estack - _stack_size;    /* stack grows downwards */
 
+/* Compatibility symbols used by crt0/newlib */
+__StackTop    = _estack;
+__StackLimit  = _stack_start;
+__stack       = _estack;
+__stack_top   = _estack;
+__stack_end__ = _stack_start;
+
 SECTIONS
 {
     .text : {
