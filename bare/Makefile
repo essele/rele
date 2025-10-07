@@ -2,7 +2,7 @@ CC = arm-none-eabi-gcc
 AR = arm-none-eabi-ar
 CXX = arm-none-eabi-g++
 
-CFLAGS = -Wall -O0 -g -mcpu=cortex-a8 -nostdlib -ffreestanding
+CFLAGS = -Wall -O0 -mcpu=cortex-a8 -nostdlib -ffreestanding
 WRAPS = -Wl,--wrap=malloc -Wl,--wrap=free -Wl,--wrap=realloc -Wl,--wrap=calloc
 LDFLAGS = -mcpu=cortex-a8 -T linker.ld $(WRAPS) -specs=rdimon.specs -lc -lgcc
 

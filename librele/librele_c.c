@@ -171,11 +171,6 @@ struct task {
     uint16_t            sp;         // more an index than pointer (smaller)
     uint16_t            stack[TASK_STACK_SIZE];
 
-    // Pointer to check for repeated matches of non-char things
-    // (like empty groups), I hate the extra space need, but otherwise
-    // it's easy to get infinite tasks spawning
-    struct node         *lastghostmatch;
-
     // All of the group matches follow...
     struct rele_match_t   grp[];
 };
@@ -788,14 +783,12 @@ struct task *task_new(struct rectx *ctx, struct task *from, struct task *next, s
 
         memcpy(task->grp, from->grp, sizeof(struct rele_match_t) * ctx->groups);
         task->sp = from->sp;
-        task->lastghostmatch = from->lastghostmatch;
     } else {
         // Make sure matches are -1 to staret with...
         for (int i=0; i < ctx->groups; i++) {
             task->grp[i].rm_so = task->grp[i].rm_eo = (int32_t)-1;
         }
         task->sp = TASK_STACK_SIZE;
-        task->lastghostmatch = NULL;
     }
     task->next = next;
     task->last = last;
@@ -943,7 +936,6 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
                     t->last = n;
                     t->n = n->parent;
-                    t->lastghostmatch = NULL;
                     goto next;
                 }
                 goto die;
@@ -1014,12 +1006,6 @@ from_GROUP:
             // in which case we die otherwise we proceed back up to the parent
             if (n->op == OP_GROUP) {
                 if (n->b == NOTUSED) {
-                    if (t->lastghostmatch == n) {
-                        // This is a second hit here, so we need to die to avoid
-                        // inifinite tasks
-                        goto die;
-                    }
-                    t->lastghostmatch = n;
                     t->n = n->parent;
                     t->last = n;
                     t->grp[n->group].rm_so = t->grp[n->group].rm_eo = (int32_t)(p - start);
@@ -1083,8 +1069,6 @@ from_GROUP:
 
             // CHeck for a ghost match on these...
             if (n->op == OP_ANCHOR) {
-                if (t->lastghostmatch == n) goto die;
-                t->lastghostmatch = n;
                 switch (n->ch1) {
                     case 'b':       if (p == start) {
                                         if (isalnum((int)*p)) goto parent;
@@ -1117,7 +1101,6 @@ from_GROUP:
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
                     t->last = n;
                     t->n = n->parent;
-                    t->lastghostmatch = NULL;
                     goto next;
                 }
                 goto die;
@@ -1130,8 +1113,6 @@ from_GROUP:
                 if (t->last == n->parent) {
                     // A zero length group match is a ghost match...
                     if (t->grp[n->mgrp].rm_so == t->grp[n->mgrp].rm_eo) {
-                        if (t->lastghostmatch == n) goto die;
-                        t->lastghostmatch = n;
                         goto parent;
                     }
                     // We will use a stack entry for tracking position...
@@ -1141,7 +1122,6 @@ from_GROUP:
                     }
                     t->sp--;
                     t->stack[t->sp] = t->grp[n->mgrp].rm_so;
-                    t->lastghostmatch = NULL;
                 }
                 if (ch == start[t->stack[t->sp]]) {
                     if (has_prior_match(ctx, run_list, n, t)) goto die;

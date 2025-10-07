@@ -111,7 +111,7 @@ int main(void) {
     struct memstats mem;
 
     //char *regex = "a?a?a?a?a?a?aaaaaa";
-//    char *text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    //char *text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 //    char *regex = "a?a?a?a?aaaaaaa";
     //char *text = "aaaaaaaaaaa";
 
