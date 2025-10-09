@@ -52,8 +52,8 @@ memwrap.so: memwrap.c
 # Turn the textual test cases into a testcases.c file so that we can then build it
 # as part of the main binary.
 #
-test_cases.c: test_cases.txt
-	./build_cases.py
+test_cases.c: cases/*
+	./build_cases.py -o test_cases.c cases/*
 
 # Clean up
 clean:

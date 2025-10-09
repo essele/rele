@@ -8,7 +8,7 @@ WRAPS = -Wl,--wrap=malloc -Wl,--wrap=free -Wl,--wrap=realloc -Wl,--wrap=calloc
 LDFLAGS =
 
 # Object for building the main function....
-OBJS = main.o memwrap.o 
+OBJS = main.o memwrap.o test_cases.o
 
 # Shims we need for each of the engines
 SHIMS = pcre/shim.o libc/shim.o newlib/shim.o tre/shim.o slre/shim.o \
@@ -37,6 +37,13 @@ all: main.elf
 
 #%.o: %.cpp
 #	$(CXX) -c -o $@ $<
+
+#
+# Turn the textual test cases into a testcases.c file so that we can then build it
+# as part of the main binary.
+#
+test_cases.c: cases/*
+	./build_cases.py -o test_cases.c cases/*
 
 main.elf: $(ENGINES) $(OBJS) $(SHIMS)
 	$(CXX) $(OBJS) $(SHIMS) $(LDFLAGS) $(WRAPS) -o $@ $(EXTRA_LIBS)

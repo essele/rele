@@ -12,12 +12,7 @@ struct engine {
     int     (*tree)();
 };
 
-struct result {
-    int     so;
-    int     eo;
-};
-
-enum {
-    E_OK = 0,
-    E_MATCHFAIL,
-};
+//enum {
+//    E_OK = 0,
+//    E_MATCHFAIL,
+//};

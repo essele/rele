@@ -187,6 +187,7 @@ def do_hex(s):
 #
 # -------------------------------------------------------------------------------
 
+
 parser = argparse.ArgumentParser(description="Process text case files and produce output file.")
 
 parser.add_argument(

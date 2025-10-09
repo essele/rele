@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include "shim.h"
 
+#include "test.h"
+
 
 // Ensure the engines are all visible...
 extern struct engine pcre_engine;
@@ -132,57 +134,52 @@ int test_match(struct engine *eng, char *regex, char *text, int flags, struct me
 }
 
 int main(int argc, char *argv[]) {
-    struct memstats mem;
-
-        printf("Hello!\n");
-
-    char *regex = "a?a?a?a?a?a?aaaaaa";
-    char *text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-//    char *regex = "a?a?a?a?aaaaaaa";
-    //char *text = "aaaaaaaaaaa";
-
-    //char *regex = "abc";
-    //char *text = "fredabcdehellookblah";
-
     memstats_init();
 
-    printf("Hello from bare metal!\n");
+    printf("Hello!\n");
 
+    const struct testcase **tcp = cases;
+    while (*tcp) {
+        const struct testcase *test = *tcp++;
 
-    memstats_zero();
-    memstats_get(&mem);    
-    fprintf(stderr, "Stack usage: %u\n", mem.total_stack);
+        char *regex = test->regex;
+        char *text = test->text;
 
-    memstats_get(&mem);    
-    fprintf(stderr, "Stack usage: %u\n", mem.total_stack);
+        fprintf(stderr, "Test: %s/%s\n", test->group, test->name);
+        fprintf(stderr, "Regex: %s\n", test->regex);
+        if (strlen(test->text) > 100) {
+            fprintf(stderr, "Text: (long, %d chars)\n", (int)strlen(test->text));
+        } else {
+            fprintf(stderr, "Text: %s\n", test->text);
+        }
 
-    memstats_zero();
-    memstats_get(&mem);    
-    fprintf(stderr, "Stack usage: %u\n", mem.total_stack);
+        struct engine **ep = engines;
+        while (*ep) {
+            struct engine *eng = *ep;
+            struct memstats mem;
+            int compile_rc, match_rc;
+            uint32_t compile_time, match_time;
 
-    struct engine **ep = engines;
-    while (*ep) {
-        struct engine *eng = *ep;
-        struct memstats mem;
+            fprintf(stderr, "Engine: %s\n", eng->name);
 
-        fprintf(stderr, "Engine: %s\n", eng->name);
+            compile_rc = test_compile(eng, regex, 0, &mem);
+            fprintf(stderr, "Engine: %s compile=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
+                                        compile_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
 
-        int compile_rc = test_compile(eng, regex, 0, &mem);
-        fprintf(stderr, "Engine: %s compile=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
-                                    compile_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
+            if (compile_rc == 1) {
+                match_rc = test_match(eng, regex, text, 0, &mem);
+                fprintf(stderr, "Engine: %s match=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
+                                            match_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
+            }
 
-        int match_rc = test_match(eng, regex, text, 0, &mem);
-        fprintf(stderr, "Engine: %s match=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
-                                    match_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
-
-
-        uint32_t compile_time = time_compile(eng, regex, 0);
-        uint32_t match_time = time_match(eng, regex, text, 0);
-        fprintf(stderr, "Engine: %s (compile=%u match=%u)\n", eng->name, compile_time, match_time);
-
-        ep++;
+            if (compile_rc ==1) {
+                compile_time = time_compile(eng, regex, 0);
+                match_time = time_match(eng, regex, text, 0);
+                fprintf(stderr, "Engine: %s (compile=%u match=%u)\n", eng->name, compile_time, match_time);
+            }
+            ep++;
+        }
     }
-
 
     printf("here\n");
 

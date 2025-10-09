@@ -1,15 +1,5 @@
-
-
-struct engine {
-    char    *name;
-    int     (*compile)(char *regex);
-    int     (*match)(char *text);
-    int     (*res_count)();
-    int     (*res_so)(int res);
-    int     (*res_eo)(int res);
-    int     (*free)();
-    int     (*tree)();
-};
+#ifndef __TEST_H
+#define __TEST_H
 
 struct result {
     int     so;
@@ -38,3 +28,5 @@ struct testcase {
 };
 
 extern const struct testcase *cases[];
+
+#endif
