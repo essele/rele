@@ -1,0 +1,25 @@
+digraph tree {
+    n0xba1dc5d793a0 [label="(5)
+CONCAT
+"];
+    n0xba1dc5d793a0 -> n0xba1dc5d792d8 [label="a"];
+    n0xba1dc5d792d8 [label="(0)
+GROUP
+0"];
+    n0xba1dc5d792d8 -> n0xba1dc5d79328 [label="b"];
+    n0xba1dc5d79328 [label="(2)
+ALTERNATE
+"];
+    n0xba1dc5d79328 -> n0xba1dc5d79300 [label="a"];
+    n0xba1dc5d79300 [label="(1)
+MATCH
+'a'"];
+    n0xba1dc5d79328 -> n0xba1dc5d79350 [label="b"];
+    n0xba1dc5d79350 [label="(3)
+MATCH
+'b'"];
+    n0xba1dc5d793a0 -> n0xba1dc5d79378 [label="b"];
+    n0xba1dc5d79378 [label="(4)
+DONE
+"];
+}

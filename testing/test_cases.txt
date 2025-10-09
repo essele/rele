@@ -256,5 +256,14 @@ N:broken
 sometextwithabcinthemiddle
 0:0,26
 
-
+#
+# This one checks that a valid task isn't killed by the optimiser
+# as the outcome from a multi-group match isn't known until later
+#
+N:taskoptimiser1
+/(a+)(a+)bb\1
+aaaabba
+0:0,7
+1:0,1
+2:1,4
 

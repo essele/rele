@@ -15,7 +15,7 @@ engines: $(ENGINES:%=engines/%)
 #
 # Librele special case
 #
-librele.o: ../librele/librele_c.c
+librele.o: ../librele/librele.c
 	$(CC) $(CFLAGS) -O2 -c -o $@ $<
 
 #

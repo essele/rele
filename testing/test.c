@@ -149,6 +149,7 @@ int main(int argc, char *argv[]) {
     char    *cf_engine = "all";
     int     cf_show_matches = 0;
     int     cf_build_tree = 0;
+    int     cf_one = 0;
 
     int args = argc;
     char **ap = &argv[1];
@@ -164,6 +165,8 @@ int main(int argc, char *argv[]) {
             cf_show_matches = 1;
         } else if (strcmp(arg, "-tree") == 0) {
             cf_build_tree = 1;
+        } else if (strcmp(arg, "-1") == 0) {
+            cf_one = 1;
         }
         ap++;
         args--;
@@ -276,25 +279,27 @@ timings:
             used = stack_usage();
 
             e->free();
-            
-            // If we are successful, then lets try some timing tests...
-            clock_gettime(CLOCK_MONOTONIC, &start);
-            for (int i=0; i < t->iter; i++) {
-                e->compile(t->regex);
-                e->free();
-            }
-            e->compile(t->regex);
-            clock_gettime(CLOCK_MONOTONIC, &compile);
-            for (int i=0; i < t->iter; i++) {
-                e->match(t->text);
-            }
-            clock_gettime(CLOCK_MONOTONIC, &end);
 
+            if (!cf_one) {
+                
+                // If we are successful, then lets try some timing tests...
+                clock_gettime(CLOCK_MONOTONIC, &start);
+                for (int i=0; i < t->iter; i++) {
+                    e->compile(t->regex);
+                    e->free();
+                }
+                e->compile(t->regex);
+                clock_gettime(CLOCK_MONOTONIC, &compile);
+                for (int i=0; i < t->iter; i++) {
+                    e->match(t->text);
+                }
+                clock_gettime(CLOCK_MONOTONIC, &end);
+            
        //     fprintf(stderr, "Elapsed time: %ld nsec\n", diff_timespec(start, end).tv_nsec);
 
     do_free:
-            e->free();
-
+                e->free();
+            }
     done:
             //mem = memstats_get();
 
