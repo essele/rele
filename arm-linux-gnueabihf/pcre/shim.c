@@ -6,20 +6,27 @@
 #include <string.h>
 #include <stdio.h>
 #include "../shim.h"
+#include "../test.h"
 
 static pcre2_code *pcre_code;
 static pcre2_match_data *match_data;
 static int errornumber;
 static PCRE2_SIZE erroroffset;
 
-int libpcre_compile(char *regex) {
-    pcre_code = pcre2_compile((PCRE2_SPTR8)regex, PCRE2_ZERO_TERMINATED, 0, &errornumber, &erroroffset, NULL); 
+int libpcre_compile(char *regex, int flags) {
+    int real_flags = 0;
+
+    if (flags & F_ICASE) real_flags |= PCRE2_CASELESS;
+    if (flags & F_NEWLINE) real_flags |= PCRE2_MULTILINE;
+
+
+    pcre_code = pcre2_compile((PCRE2_SPTR8)regex, PCRE2_ZERO_TERMINATED, real_flags, &errornumber, &erroroffset, NULL); 
     if (!pcre_code) return 0;
 
     match_data = pcre2_match_data_create_from_pattern(pcre_code, NULL);
     return 1;
 }
-int libpcre_match(char *text) {
+int libpcre_match(char *text, int flags) {
     pcre2_match(pcre_code, (PCRE2_SPTR8)text, strlen(text), 0, 0, match_data, NULL);
     return 1;       // TODO
 }

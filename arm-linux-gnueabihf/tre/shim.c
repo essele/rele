@@ -9,15 +9,15 @@
 static regex_t         tre_regex;
 static regmatch_t      pmatch[LIBC_MAX_GROUPS];
 
-static int tre_compile(char *regex) {
-    if (regcomp(&tre_regex, regex, REG_EXTENDED)) {
+static int tre_compile(char *regex, int flags) {
+    if (tre_regcomp(&tre_regex, regex, REG_EXTENDED)) {
         // Compile Failed...
         return 0;
     }
     return 1;
 }
-static int tre_match(char *text) {
-    int res = regexec(&tre_regex, text, LIBC_MAX_GROUPS, pmatch, 0);
+static int tre_match(char *text, int flags) {
+    int res = tre_regexec(&tre_regex, text, LIBC_MAX_GROUPS, pmatch, 0);
     if (res) return 0;  // match failed
     return 1;
 }

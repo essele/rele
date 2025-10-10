@@ -3,7 +3,7 @@ AR = arm-linux-gnueabihf-ar
 CXX = arm-linux-gnueabihf-g++
 RANLIB = arm-linux-gnueabihf-ranlib
 
-CFLAGS = -Wall -O0
+CFLAGS = -Wall -O0 -static
 WRAPS = -Wl,--wrap=malloc -Wl,--wrap=free -Wl,--wrap=realloc -Wl,--wrap=calloc
 LDFLAGS =
 
@@ -46,7 +46,7 @@ test_cases.c: cases/*
 	./build_cases.py -o test_cases.c cases/*
 
 main.elf: $(ENGINES) $(OBJS) $(SHIMS)
-	$(CXX) $(OBJS) $(SHIMS) $(LDFLAGS) $(WRAPS) -o $@ $(EXTRA_LIBS)
+	$(CXX) -static $(OBJS) $(SHIMS) $(LDFLAGS) $(WRAPS) -o $@ $(EXTRA_LIBS)
 	
 # -L./pcre/pcre2/.libs -lpcre2-8
 

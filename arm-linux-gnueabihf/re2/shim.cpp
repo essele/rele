@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <iostream>
 
+#include "../test.h"
 
 // ---- internal state ----
 static RE2 *re2_regex = nullptr;
@@ -30,10 +31,14 @@ void print_piece(const re2::StringPiece& sp) {
 }
 
 
-static int re2_compile(char *pattern_c) {
+static int re2_compile(char *pattern_c, int flags) {
     std::string pattern(pattern_c);
+    RE2::Options options;
 
-    re2_regex = new RE2(pattern, RE2::DefaultOptions);
+    if (flags & F_ICASE) { options.set_case_sensitive(false); }
+    if (flags & F_NEWLINE) { options.set_dot_nl(true); }
+
+    re2_regex = new RE2(pattern, options);
     if (!re2_regex->ok()) {
         // compilation failed
         delete re2_regex;
@@ -52,7 +57,7 @@ static int re2_compile(char *pattern_c) {
     return 1;
 }
 
-static int re2_match(char *text) {
+static int re2_match(char *text, int flags) {
     //re2_subject = std::string(text);
     re2_subject = re2::StringPiece(text, strlen(text));
 

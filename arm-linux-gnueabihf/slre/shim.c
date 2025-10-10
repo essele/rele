@@ -11,7 +11,7 @@ static char 	*last_input;			// to keep for later!
 #define SLRE_MAX_CAPTURES	10
 struct slre_cap	captures[SLRE_MAX_CAPTURES];
 
-static int slree_compile(char *regex) {
+static int slree_compile(char *regex, int flags) {
 	strcpy(last_regex, "(");
 	strcat(last_regex, regex);
 	strcat(last_regex, ")");
@@ -22,7 +22,7 @@ static int slree_compile(char *regex) {
 	}
 	return 1;
 }
-static int slree_match(char *text) {
+static int slree_match(char *text, int flags) {
 	last_input = text;
 
 	offset = slre_match(last_regex, text, strlen(text), captures, SLRE_MAX_CAPTURES, 0);

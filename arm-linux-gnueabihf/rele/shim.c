@@ -5,13 +5,13 @@
 #include "../shim.h"
 static struct rectx *rele_ctx;
 
-int librele_compile(char *regex) {
+int librele_compile(char *regex, int flags) {
     rele_ctx = rele_compile(regex, 0);
     if (!rele_ctx) return 0;
     //rele_export_tree(rele_ctx, "out.dot");
     return 1;
 }
-int librele_match(char *text) {
+int librele_match(char *text, int flags) {
     if (rele_match(rele_ctx, text, 0, 0)) return 1;
     return 0;
 }
@@ -34,7 +34,7 @@ int librele_tree() {
 }
 
 struct engine rele_engine = {
-    .name = "RELE",
+    .name = "rele",
     .compile = librele_compile,
     .match = librele_match,
     .res_count = librele_res_count,

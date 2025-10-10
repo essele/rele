@@ -7,6 +7,11 @@ struct result {
 };
 
 enum {
+    F_ICASE = (1 << 0),
+    F_NEWLINE = (1 << 1),
+};
+
+enum {
     E_OK = 0,
     E_MATCHFAIL,
 };

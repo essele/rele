@@ -3,16 +3,11 @@
  */
 struct engine {
     char    *name;
-    int     (*compile)(char *regex);
-    int     (*match)(char *text);
+    int     (*compile)(char *regex, int flags);
+    int     (*match)(char *text, int flags);
     int     (*res_count)();
     int     (*res_so)(int res);
     int     (*res_eo)(int res);
     int     (*free)();
     int     (*tree)();
 };
-
-//enum {
-//    E_OK = 0,
-//    E_MATCHFAIL,
-//};

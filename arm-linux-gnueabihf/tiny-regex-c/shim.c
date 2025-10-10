@@ -6,13 +6,13 @@ static re_t ctx;
 static int offset;
 static int	mlen;
 
-static int tinyrc_compile(char *regex) {
+static int tinyrc_compile(char *regex, int flags) {
 	ctx = re_compile(regex);
 	if (!ctx) return 0;
 	return 1;
 }
 #include <stdio.h>
-static int tinyrc_match(char *text) {
+static int tinyrc_match(char *text, int flags) {
 	offset = re_matchp(ctx, text, &mlen);
 	if (offset < 0) return 0;		// match failed
 	return 1;

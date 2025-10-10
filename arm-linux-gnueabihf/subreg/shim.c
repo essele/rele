@@ -11,7 +11,7 @@ static char	last_regex[1024];		// to adjust for ^ and $
 
 static char 	*last_input;			// to keep for later!
 
-static int subr_compile(char *regex) {
+static int subr_compile(char *regex, int flags) {
 	strcpy(last_regex, regex);
 //	strcpy(last_regex, ".*");
 //	strcat(last_regex, regex);
@@ -19,7 +19,7 @@ static int subr_compile(char *regex) {
 // This doesn't work, bug raised on the github
 	return 1;
 }
-static int subr_match(char *text) {
+static int subr_match(char *text, int flags) {
 	last_input = text;
 	capture_count = subreg_match(last_regex, text, captures, SUBR_MAX_GROUPS, 128);
 	if (capture_count < 0) {
