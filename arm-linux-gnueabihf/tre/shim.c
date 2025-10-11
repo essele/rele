@@ -2,6 +2,7 @@
  * Sample code for the tre implementation
  */
 #include "../shim.h"
+#include "../test.h"
 #define USE_LOCAL_TRE_H
 #include "tre/local_includes/regex.h"
 
@@ -10,7 +11,12 @@ static regex_t         tre_regex;
 static regmatch_t      pmatch[LIBC_MAX_GROUPS];
 
 static int tre_compile(char *regex, int flags) {
-    if (tre_regcomp(&tre_regex, regex, REG_EXTENDED)) {
+    int real_flags = REG_EXTENDED;
+
+    if (flags & F_ICASE) real_flags |= REG_ICASE;
+    if (flags & F_NEWLINE) real_flags |= REG_NEWLINE;
+
+    if (tre_regcomp(&tre_regex, regex, real_flags)) {
         // Compile Failed...
         return 0;
     }

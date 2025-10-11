@@ -3,12 +3,12 @@ AR = arm-linux-gnueabihf-ar
 CXX = arm-linux-gnueabihf-g++
 RANLIB = arm-linux-gnueabihf-ranlib
 
-CFLAGS = -Wall -O0 -static
+CFLAGS = -Wall -O2 -static
 WRAPS = -Wl,--wrap=malloc -Wl,--wrap=free -Wl,--wrap=realloc -Wl,--wrap=calloc
 LDFLAGS =
 
 # Object for building the main function....
-OBJS = main.o memwrap.o test_cases.o
+OBJS = main.o memwrap.o test_cases.o rele/rele.o
 
 # Shims we need for each of the engines
 SHIMS = pcre/shim.o libc/shim.o newlib/shim.o tre/shim.o slre/shim.o \
@@ -25,8 +25,7 @@ EXTRA_LIBS = -Lpcre/pcre2/.libs -lpcre2-8 \
 				slre/slre/slre.o \
 				tiny-regex-c/tiny-regex-c/re.o \
 				subreg/subreg/subreg.o \
-				-Lre2/re2 -lre2 -Lre2/abseil-cpp/build/absl -labsl \
-				rele/rele.o
+				-Lre2/re2 -lre2 -Lre2/abseil-cpp/build/absl -labsl
 
 
 

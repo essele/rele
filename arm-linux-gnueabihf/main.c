@@ -68,7 +68,7 @@ uint64_t timespec_to_ns(struct timespec t) {
 /**
  * Routines that time the execution of compiling and matching
  */
-#define MAX_ALLOWED_NS (1000 * 1000 * 1000 * 2)
+#define MAX_ALLOWED_NS (1000UL * 1000 * 1000 * 5)
 #define MAX_ITERATIONS (200000)
 
 uint32_t time_compile(struct engine *eng, char *regex, int flags) {
@@ -203,10 +203,6 @@ int main(int argc, char *argv[]) {
         if (!is_in(test->group, cf_groups)) continue;
         if (!is_in(test->name, cf_tests)) continue;
 
-
-        char *regex = test->regex;
-        char *text = test->text;
-
         fprintf(stderr, "Test: %s/%s\n", test->group, test->name);
         fprintf(stderr, "Regex: %s\n", test->regex);
         if (strlen(test->text) > 100) {
@@ -226,20 +222,41 @@ int main(int argc, char *argv[]) {
 
             fprintf(stderr, "Engine: %s\n", eng->name);
 
-            compile_rc = test_compile(eng, regex, 0, &mem);
+            compile_rc = test_compile(eng, test->regex, test->cflags, &mem);
             fprintf(stderr, "Engine: %s compile=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
                                         compile_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
 
             if (compile_rc == 1) {
-                match_rc = test_match(eng, regex, 0, text, 0, &mem);
+                match_rc = test_match(eng, test->regex, test->cflags, test->text, 0, &mem);
                 fprintf(stderr, "Engine: %s match=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
                                             match_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
+
+                if (match_rc && cf_show_matches) {
+                    // We need to run another compile/match as we will have been freed by the above...
+                    eng->compile(test->regex, test->cflags);
+                    eng->match(test->text, test->mflags);
+
+                    int res_groups = eng->res_count();
+                    int max = (test->groups > res_groups ? test->groups : res_groups);
+                    for (int i=0; i < max; i++) {
+                        int tso = (i < test->groups ? test->res[i].so : -1);
+                        int teo = (i < test->groups ? test->res[i].eo : -1);
+                        int eso = (i < res_groups ? eng->res_so(i) : -1);
+                        int eeo = (i < res_groups ? eng->res_eo(i) : -1);
+                        char *status = ((tso == eso) && (teo == eeo)) ? "OK" : "FAIL";
+                        fprintf(stderr, "\tExpected: %d: (%d, %d) got (%d, %d) -- %s\n", i, tso, teo, eso, eeo, status);
+                    }
+
+                    eng->free();
+                }
             }
 
-            if (compile_rc ==1) {
-                compile_time = time_compile(eng, regex, 0);
-                match_time = time_match(eng, regex, 0, text, 0);
-                fprintf(stderr, "Engine: %s (compile=%u match=%u)\n", eng->name, compile_time, match_time);
+            if (!cf_one) {
+                if (compile_rc ==1) {
+                    compile_time = time_compile(eng, test->regex, test->cflags);
+                    match_time = time_match(eng, test->regex, test->cflags, test->text, 0);
+                    fprintf(stderr, "Engine: %s (compile=%u match=%u)\n", eng->name, compile_time, match_time);
+                }
             }
         }
     }

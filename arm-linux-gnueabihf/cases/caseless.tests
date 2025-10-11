@@ -1,0 +1,23 @@
+
+
+
+N:simpleicase
+/abc
+CF:CASELESS
+T:helloABCok
+0: 5,8
+
+N:groupmatchicase
+/(abc)\1
+CF:CASELESS
+T:ABCabc
+0:0,6
+1:0,3
+
+N:groupmatchicase2
+/(abc)\1
+CF:CASELESS
+T:abcABC
+0:0,6
+1:0,3
+

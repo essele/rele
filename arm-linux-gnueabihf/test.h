@@ -25,6 +25,8 @@ struct testcase {
     char *desc;
     char *regex;
     char *text;
+    int cflags;
+    int mflags;
     int rc;
     int groups;
     int error;                  // expected errors

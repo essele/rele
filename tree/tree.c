@@ -15,7 +15,7 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Usage: %s <dot_file_name> <regex>\n", argv[0]);
 		exit(1);
 	}
-	ctx = rele_compile(argv[2], 0);
+	ctx = rele_compile(argv[2], F_CASELESS);
 	if (!ctx) {
 		fprintf(stderr, "Compilation failed.\n");
 		exit(0);

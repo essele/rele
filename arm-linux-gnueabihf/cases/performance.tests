@@ -30,3 +30,12 @@ I:10
 GEN:random,64K
 0:0,16384
 
+N:evil
+/(.*)(.*)fredABC
+GEN:random,1K
+J:NONE
+T:fredABC
+0:0,1031
+1:0,1024
+2:1024,1024
+

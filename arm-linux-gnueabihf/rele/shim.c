@@ -6,13 +6,13 @@
 static struct rectx *rele_ctx;
 
 int librele_compile(char *regex, int flags) {
-    rele_ctx = rele_compile(regex, 0);
+    rele_ctx = rele_compile(regex, flags);
     if (!rele_ctx) return 0;
     //rele_export_tree(rele_ctx, "out.dot");
     return 1;
 }
 int librele_match(char *text, int flags) {
-    if (rele_match(rele_ctx, text, 0, 0)) return 1;
+    if (rele_match(rele_ctx, text, 0, flags)) return 1;
     return 0;
 }
 int librele_res_count() {

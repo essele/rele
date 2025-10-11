@@ -1,25 +1,45 @@
 digraph tree {
-    n0xba1dc5d793a0 [label="(5)
+    n0xb85995d37420 [label="(10)
 CONCAT
 "];
-    n0xba1dc5d793a0 -> n0xba1dc5d792d8 [label="a"];
-    n0xba1dc5d792d8 [label="(0)
+    n0xb85995d37420 -> n0xb85995d372e0 [label="a"];
+    n0xb85995d372e0 [label="(0)
 GROUP
 0"];
-    n0xba1dc5d792d8 -> n0xba1dc5d79328 [label="b"];
-    n0xba1dc5d79328 [label="(2)
-ALTERNATE
+    n0xb85995d372e0 -> n0xb85995d37340 [label="b"];
+    n0xb85995d37340 [label="(3)
+CONCAT
 "];
-    n0xba1dc5d79328 -> n0xba1dc5d79300 [label="a"];
-    n0xba1dc5d79300 [label="(1)
+    n0xb85995d37340 -> n0xb85995d37300 [label="a"];
+    n0xb85995d37300 [label="(1)
 MATCH
-'a'"];
-    n0xba1dc5d79328 -> n0xba1dc5d79350 [label="b"];
-    n0xba1dc5d79350 [label="(3)
+'X'"];
+    n0xb85995d37340 -> n0xb85995d373a0 [label="b"];
+    n0xb85995d373a0 [label="(6)
+CONCAT
+"];
+    n0xb85995d373a0 -> n0xb85995d37360 [label="a"];
+    n0xb85995d37360 [label="(4)
+STAR
+"];
+    n0xb85995d37360 -> n0xb85995d37320 [label="b"];
+    n0xb85995d37320 [label="(2)
 MATCH
-'b'"];
-    n0xba1dc5d793a0 -> n0xba1dc5d79378 [label="b"];
-    n0xba1dc5d79378 [label="(4)
+SPECIAL '.'"];
+    n0xb85995d373a0 -> n0xb85995d373e0 [label="b"];
+    n0xb85995d373e0 [label="(8)
+CONCAT
+"];
+    n0xb85995d373e0 -> n0xb85995d37380 [label="a"];
+    n0xb85995d37380 [label="(5)
+MATCHSTR
+'ABCDEFGHIJK'"];
+    n0xb85995d373e0 -> n0xb85995d373c0 [label="b"];
+    n0xb85995d373c0 [label="(7)
+ANCHOR
+'$'"];
+    n0xb85995d37420 -> n0xb85995d37400 [label="b"];
+    n0xb85995d37400 [label="(9)
 DONE
 "];
 }

@@ -57,6 +57,18 @@ def build_cases(filename):
                 case["iter"] = line[2:]
                 continue
 
+            if line[:3] == "CF:":
+                if (not "cflags" in case):
+                    case["cflags"] = []
+                if (line == "CF:CASELESS"):
+                    case["cflags"].append("F_ICASE")
+                elif (line == "CF:NEWLINE"):
+                    case["cflags"].append("F_NEWLINE")
+                else:
+                    print("Unknown flag: " + line[2:])
+                    sys.exit(1)
+                continue
+
             if line[:2] == "J:":
                 if (line == "J:NONE"):
                     joiner = ""
@@ -118,6 +130,7 @@ def build_cases(filename):
                     case["res"] = []
 
                 if (num != len(case["res"])):
+                    print(">>> " + line)
                     print("RESULTS MUST BE IN ORDER STARTING AT 0")
                     sys.exit()
 
@@ -146,7 +159,8 @@ def build_cases(filename):
                 continue
 
             # Anything else is an error
-            print("RESULTS MUST BE IN ORDER STARTING AT 0")
+            print(">>> " + line)
+            print("SOMETHING UNKNOWN")
             sys.exit()
 
     return cases
@@ -253,6 +267,10 @@ with open(args.outfile,'w') as outfile:
                 print(F"\t.iter = {case["iter"]},")
             else:
                 print(F"\t.iter = 100000,")
+            if ("cflags" in case):
+                print(F"\t.cflags = " + "|".join(case["cflags"]) + ",")
+            else:
+                print(F"\t.cflags = 0,")
 
             out = "\t.res = { " + ", ".join(f"{{ {a}, {b} }}" for a, b in case["res"]) + " },"
             print(out)
