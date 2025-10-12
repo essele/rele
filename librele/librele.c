@@ -410,6 +410,7 @@ struct node *optimiser(struct rectx *ctx) {
 
             // TODO: If we have concurrent dotstar's can we somehow inherit
             // the match? Not sure if easy or possible? or sensible.
+            // TODO: DOTPLUS ... basically a dotstar but can't be zero??
             case OP_DOTSTAR:
                 dotstar = n;
                 dotstar->match = NULL;
@@ -609,9 +610,7 @@ static inline char *rele_strifind(const char *haystack, int hlen, const char *ne
  *       in which case we end up plussing the whole thing.
  *       Easy option would be to treat quoted strings as individual items
  *       then perhaps look for options to merge strings if they are just
- *       concatenated?
- * 
- * TODO: caseless
+ *       concatenated? 
  */
 char *find_string(char *p, char *str, int *len, char *ch, int icase) {
 	char c;			// single return char
@@ -720,9 +719,8 @@ struct rectx *alloc_ctx(char *regex) {
                 continue;                   // p is already incrememented
 
             // These are always a node...
-            // TODO: DOTSTAR!!!!
             case '*':
-                if (p > regex && p[-1] == '.') nodes--;
+                if (p > regex && p[-1] == '.') nodes--;     // DOTSTAR
                 // Fall through...
 
             case '+': case '?':
@@ -801,9 +799,6 @@ struct rectx *alloc_ctx(char *regex) {
     return ctx;
 }
 
-// TODO: testing only
-char sss[2048];
-
 // ------------------------------------------------------------------------
 // Simple compiler that turns a regular expression into a binary tree
 // ------------------------------------------------------------------------
@@ -835,7 +830,6 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
         p = find_string(p, ctx->strings, &slen, &ch, icase);
         if (!p) goto fail;
         if (slen > 1) {
-            // TODO: add a string object
             last = create_node_here(ctx, last, OP_MATCHSTR, NULL, NULL);
             last->string = ctx->strings;
             last->len = slen;
@@ -991,10 +985,8 @@ fail:
 // Simple matching with escapes and classes
 // -------------------------------------------------------------------------------
 static int matchone(char s, char ch) {
-    if (s == '.')   return 1;           // TODO: newlines and stuff
-    // NEED A SPECIAL VERSION OF DOT WHEN MULTILINE THAT DOESN"T MATECH NL ETC
-
-    if (s == ',') return (ch != '\n');
+    if (s == '.') return 1;
+    if (s == ',') return (ch != '\n');      // multi-line version of dot
     
     switch(s) {
         // Types...
@@ -1094,8 +1086,6 @@ static inline int has_same_stack(struct rectx *ctx, struct task *a, struct task 
  * Task Deduplication ... if we are have matchedsomething, then look at
  * all the tasks that went before us and see if any did the same match and
  * then, if the state is all the same, we can die.
- * 
- * TODO: is the state actually important or not??
  */
 static inline int has_prior_match(struct rectx *ctx, struct task *run_list, struct node *n, struct task *t) {
     for (struct task *x = run_list; x != t; x = x->next) {
@@ -1302,7 +1292,6 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
             // If we hit from above then spawn to go right back up (zero) and from
             // b we do the same.
-            // TODO: zero length match support
             if (n->op == OP_STAR) {
                 if (t->last == n->parent) {
                     n->iter = iter;
@@ -1381,13 +1370,11 @@ from_GROUP:
                 }
                 if (t->last == n->b) {
                     // On the way back up... fill in the length
-                    // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
                     t->n = n->parent;
                     if (n->group != NO_GROUP) { t->grp[n->group].rm_eo = (int32_t)(p - start); }
                 } else {
                     // Going down leg b... mark the start
                     t->n = n->b;
-                    // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
                     if (n->group != NO_GROUP) { t->grp[n->group].rm_so = (int32_t)(p - start); }
                 }
                 t->last = n;
@@ -1502,9 +1489,7 @@ from_GROUP:
                         if (has_prior_match(ctx, run_list, n, t)) goto die;
                         goto match_ok;
                     }
-
-                    // Otherwise see if match... TODO: this is an issue because the first
-                    // group match won't be all in upper if case insensitive!!!
+                    // String match...
                     if (icase) {
                         if (!rele_strncasecmp(grpstr, p, len)) goto die;
                     } else {
@@ -1520,53 +1505,10 @@ from_GROUP:
                 goto next;
             }
 
-            // Match a previous group, coming from the top we initialise then stay
-            // here iterating... originally we used a separate variable, but a stack
-            // item should be fine.
-            /*
-                if (n->op == OP_MATCHGRP) {
-                // TODO TODO TODO
-                //
-                // Switch this to the same model used in the string match
-                // will simplify and speed up.
-                //
-                if (t->last == n->parent) {
-                    // A zero length group match is a ghost match...
-                    if (t->grp[n->mgrp].rm_so == t->grp[n->mgrp].rm_eo) {
-                        goto parent;
-                    }
-                    // We will use a stack entry for tracking position...
-                    if (t->sp == 0) {
-                        fprintf(stderr, "STACK OVERFLOW, MATCHGRP\n");
-                        goto die;
-                    }
-                    t->sp--;
-                    t->stack[t->sp] = t->grp[n->mgrp].rm_so;
-                }
-
-                // TODO: why not turn this into a string match and then wait around until
-                // the end?  Allows fast fail.
-
-                // We need to support matching in a different case if we have caseless set...
-                if (ch == CASEUP(start[t->stack[t->sp]], caseval)) {
-                    if (has_prior_match(ctx, run_list, n, t)) goto die;
-                    t->last = n;
-                    t->stack[t->sp]++;
-                    if (t->stack[t->sp] == t->grp[n->mgrp].rm_eo) { 
-                        t->sp++; 
-                        t->n = n->parent; 
-                    }
-                    goto next;
-                }
-                goto die;
-            }
-            */
 
             // If we come from above then get a new stack position and init, otherwise
             // count until we hit min, then spawn until max...
             //
-            // TODO: zero length match support -- any zero length match is considered
-            // to have met the requirement.
             // Need to ensure that a zero min doesn't get killed. Check from coming from b.
             if (n->op == OP_MULT) {
                 if (t->last == n->parent) {
