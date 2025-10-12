@@ -1,45 +1,89 @@
 digraph tree {
-    n0xb85995d37420 [label="(10)
+    n0xb28a2a969580 [label="(21)
 CONCAT
 "];
-    n0xb85995d37420 -> n0xb85995d372e0 [label="a"];
-    n0xb85995d372e0 [label="(0)
+    n0xb28a2a969580 -> n0xb28a2a969540 [label="a"];
+    n0xb28a2a969540 [label="(19)
+CONCAT
+"];
+    n0xb28a2a969540 -> n0xb28a2a9692e0 [label="a"];
+    n0xb28a2a9692e0 [label="(0)
 GROUP
 0"];
-    n0xb85995d372e0 -> n0xb85995d37340 [label="b"];
-    n0xb85995d37340 [label="(3)
+    n0xb28a2a9692e0 -> n0xb28a2a969340 [label="b"];
+    n0xb28a2a969340 [label="(3)
 CONCAT
 "];
-    n0xb85995d37340 -> n0xb85995d37300 [label="a"];
-    n0xb85995d37300 [label="(1)
-MATCH
-'X'"];
-    n0xb85995d37340 -> n0xb85995d373a0 [label="b"];
-    n0xb85995d373a0 [label="(6)
-CONCAT
-"];
-    n0xb85995d373a0 -> n0xb85995d37360 [label="a"];
-    n0xb85995d37360 [label="(4)
-STAR
-"];
-    n0xb85995d37360 -> n0xb85995d37320 [label="b"];
-    n0xb85995d37320 [label="(2)
-MATCH
-SPECIAL '.'"];
-    n0xb85995d373a0 -> n0xb85995d373e0 [label="b"];
-    n0xb85995d373e0 [label="(8)
-CONCAT
-"];
-    n0xb85995d373e0 -> n0xb85995d37380 [label="a"];
-    n0xb85995d37380 [label="(5)
+    n0xb28a2a969340 -> n0xb28a2a969300 [label="a"];
+    n0xb28a2a969300 [label="(1)
 MATCHSTR
-'ABCDEFGHIJK'"];
-    n0xb85995d373e0 -> n0xb85995d373c0 [label="b"];
-    n0xb85995d373c0 [label="(7)
-ANCHOR
-'$'"];
-    n0xb85995d37420 -> n0xb85995d37400 [label="b"];
-    n0xb85995d37400 [label="(9)
+'abc'"];
+    n0xb28a2a969340 -> n0xb28a2a9693a0 [label="b"];
+    n0xb28a2a9693a0 [label="(6)
+CONCAT
+"];
+    n0xb28a2a9693a0 -> n0xb28a2a969360 [label="a"];
+    n0xb28a2a969360 [label="(4)
+QUESTION
+"];
+    n0xb28a2a969360 -> n0xb28a2a969320 [label="b"];
+    n0xb28a2a969320 [label="(2)
+MATCH
+'a'"];
+    n0xb28a2a9693a0 -> n0xb28a2a9693e0 [label="b"];
+    n0xb28a2a9693e0 [label="(8)
+CONCAT
+"];
+    n0xb28a2a9693e0 -> n0xb28a2a969380 [label="a"];
+    n0xb28a2a969380 [label="(5)
+DOTSTAR
+none"];
+    n0xb28a2a9693e0 -> n0xb28a2a969500 [label="b"];
+    n0xb28a2a969500 [label="(17)
+CONCAT
+"];
+    n0xb28a2a969500 -> n0xb28a2a9693c0 [label="a"];
+    n0xb28a2a9693c0 [label="(7)
+GROUP
+1"];
+    n0xb28a2a9693c0 -> n0xb28a2a9694a0 [label="b"];
+    n0xb28a2a9694a0 [label="(14)
+ALTERNATE
+"];
+    n0xb28a2a9694a0 -> n0xb28a2a969440 [label="a"];
+    n0xb28a2a969440 [label="(11)
+CONCAT
+"];
+    n0xb28a2a969440 -> n0xb28a2a969400 [label="a"];
+    n0xb28a2a969400 [label="(9)
+MATCH
+'a'"];
+    n0xb28a2a969440 -> n0xb28a2a969480 [label="b"];
+    n0xb28a2a969480 [label="(13)
+CONCAT
+"];
+    n0xb28a2a969480 -> n0xb28a2a969420 [label="a"];
+    n0xb28a2a969420 [label="(10)
+DOTSTAR
+[SRCH NODE 12]"];
+    n0xb28a2a969480 -> n0xb28a2a969460 [label="b"];
+    n0xb28a2a969460 [label="(12)
+MATCHSTR
+'bcd'"];
+    n0xb28a2a9694a0 -> n0xb28a2a9694c0 [label="b"];
+    n0xb28a2a9694c0 [label="(15)
+MATCHSTR
+'joe'"];
+    n0xb28a2a969500 -> n0xb28a2a9694e0 [label="b"];
+    n0xb28a2a9694e0 [label="(16)
+MATCHSTR
+'zzz'"];
+    n0xb28a2a969540 -> n0xb28a2a969520 [label="b"];
+    n0xb28a2a969520 [label="(18)
+MATCHSTR
+'xde'"];
+    n0xb28a2a969580 -> n0xb28a2a969560 [label="b"];
+    n0xb28a2a969560 [label="(20)
 DONE
 "];
 }

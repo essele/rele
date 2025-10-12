@@ -5,11 +5,12 @@
 #include <stdint.h>
 
 // Compile flags...
-#define F_CASELESS          (1 << 0)            // caseless matching
-#define F_NO_FASTSTART      (2 << 0)            // disable FASTSTART optimisation
+#define RELE_CASELESS          (1 << 0)            // caseless matching
+#define RELE_NEWLINE           (1 << 1)            // multiline matching
+#define RELE_NO_FASTSTART      (1 << 2)            // disable FASTSTART optimisation
 
 // Match flags...
-#define F_KEEP_TASKS        (1 << 16)
+#define RELE_KEEP_TASKS        (1 << 16)
 
 // A define for this, but it will be anonymous
 struct rectx;

@@ -35,8 +35,9 @@ static int re2_compile(char *pattern_c, int flags) {
     std::string pattern(pattern_c);
     RE2::Options options;
 
+    options.set_posix_syntax(true);
     if (flags & F_ICASE) { options.set_case_sensitive(false); }
-    if (flags & F_NEWLINE) { options.set_dot_nl(true); }
+    if (flags & F_NEWLINE) { options.set_one_line(false); }
 
     re2_regex = new RE2(pattern, options);
     if (!re2_regex->ok()) {

@@ -3,10 +3,16 @@
  */
 #include "rele.h"
 #include "../shim.h"
+#include "../test.h"
 static struct rectx *rele_ctx;
 
 int librele_compile(char *regex, int flags) {
-    rele_ctx = rele_compile(regex, flags);
+    int real_flags = 0;
+
+    if (flags & F_ICASE) real_flags |= RELE_CASELESS;
+    if (flags & F_NEWLINE) real_flags |= RELE_NEWLINE;
+
+    rele_ctx = rele_compile(regex, real_flags);
     if (!rele_ctx) return 0;
     //rele_export_tree(rele_ctx, "out.dot");
     return 1;

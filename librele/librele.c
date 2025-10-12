@@ -25,6 +25,7 @@ enum {
 
     OP_PLUS,
     OP_STAR,
+    OP_DOTSTAR,
     OP_QUESTION,
 
     OP_GROUP,
@@ -35,7 +36,7 @@ enum {
     OP_MATCHGRP,
     OP_MULT, 
     OP_CRLF,
-
+ 
     OP_DONE,
 };
 
@@ -60,6 +61,7 @@ struct node {
         struct node     *b;             // the second child
         struct set      *set;           // a possible set match
         char            *string;        // a possible string match
+        struct node     *match;         // a DOTSTAR next match node
         uint8_t         mgrp;           // a possible group match
         struct {
             char            ch1;        // normal char
@@ -105,12 +107,6 @@ struct rectx {
 #define HAS_FLAG(v, f)           (v & f)
 
 #define NODE_ID(ctx, n)          (int)(((void *)n - ((void *)ctx + sizeof(struct rectx)))/sizeof(struct node))
-
-/**
- * Hopefully fairly optimised way of doing a case check and forcing upper...
- */
-#define CASEUP(ch, caseval)     ((unsigned)(ch - 'a') <= ('z' - 'a') ? ch - caseval : ch)
-
 
 
 static struct node *create_node_above(struct rectx *ctx, struct node *this, uint8_t op, struct node *a, struct node *b) {
@@ -215,7 +211,8 @@ struct set {
 };
 
 //
-// TODO: if caseless, just put uppercase stuff in!
+// TODO: if caseless, just put lowercase stuff in!
+// TODO: do we need to support hex to hex [0x30-0x39] ??
 //
 static char *build_set(struct rectx *ctx, char *p, struct node *n) {
     // "Allocate" the space...
@@ -236,7 +233,7 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
         if (*p == ']') break;           // done
         if (p[1] == '-' && p[2] && p[2] != ']') {
             if (p[0] > p[2]) goto fail;
-            if (ctx->flags & F_CASELESS) {
+            if (ctx->flags & RELE_CASELESS) {
                 SET_CASELESS_RANGE(p[0], p[2]);
             } else {
                 SET_RANGE(p[0], p[2]);
@@ -258,7 +255,7 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
                     default:    SET_VAL(*p); break;
                 }
             } else {
-                if (ctx->flags & F_CASELESS) {
+                if (ctx->flags & RELE_CASELESS) {
                     SET_CASELESS_VAL(*p);
                 } else {
                     SET_VAL(*p);
@@ -388,6 +385,83 @@ static inline int tohex(const char *p) {
 }
 
 // ------------------------------------------------------------------------
+// NEW WORK ON DOTSTAR
+//
+// Walk the tree, and update dotstar optimisation if we can, in an ideal
+// world, we might also be able to use this for faststart.
+// ------------------------------------------------------------------------
+struct node *optimiser(struct rectx *ctx) {
+    struct node *n = ctx->root;
+    struct node *dotstar = NULL;
+    struct node *last = NULL;
+
+    while (n) {
+        switch (n->op) {
+            case OP_MATCH:
+            case OP_MATCHSTR:
+                if (dotstar) { dotstar->match = n; dotstar = NULL; }
+                goto parent;
+
+            case OP_MATCHGRP:
+            case OP_MATCHSET:
+            case OP_ANCHOR:
+            case OP_CRLF:
+                goto parent;
+
+            case OP_DOTSTAR:
+                dotstar = n;
+                dotstar->match = NULL;
+                goto parent;
+
+            case OP_CONCAT:
+                if (last == n->a) goto leg_b;
+                if (last == n->b) goto parent;
+                goto leg_a;
+
+            case OP_ALTERNATE:
+                dotstar = NULL;
+                if (last == n->a) goto leg_b;
+                if (last == n->b) goto parent;
+                goto leg_a;
+
+            case OP_QUESTION:
+                if (last == n->b) goto parent;
+                goto leg_b;
+
+            case OP_GROUP:
+                if (n->b == NOTUSED) goto parent;
+                if (last == n->b) goto parent;
+                goto leg_b;
+
+            case OP_DONE:
+                goto done;
+
+            default:
+                fprintf(stderr, "INVALID OP: %d\n", n->op);
+                return NULL;
+    
+
+leg_a:      last = n;
+            n = n->a;
+            continue;
+
+leg_b:      last = n;
+            n = n->b;
+            continue;
+
+parent:     last = n;
+            n = n->parent;
+            continue;
+
+        }
+done:       break;
+    }
+    return NULL;
+}
+
+
+
+// ------------------------------------------------------------------------
 // Optimisation detector...
 //
 // We will walk through the start of the tree and see if we can identify
@@ -430,6 +504,7 @@ struct node *fast_start(struct rectx *ctx) {
             case OP_MULT:           if (n->min > 0) n = n->b; continue;
 
             // None of these are viable...
+            case OP_DOTSTAR:
             case OP_ALTERNATE:
             case OP_ANCHOR:
             case OP_CRLF:
@@ -447,6 +522,20 @@ struct node *fast_start(struct rectx *ctx) {
 }
 
 /**
+ * Some utility functions
+ */
+
+ /**
+  * A fast tolower() implementation, should be branch-free on ARM...
+  */
+static inline unsigned char fast_tolower(unsigned char c)
+{
+    // If 'A' <= c <= 'Z', set bit 5 (0x20), else leave unchanged
+    unsigned char is_upper = (unsigned)((c - 'A') <= ('Z' - 'A'));
+    return c + (is_upper * 32);
+}
+
+/**
  * My version of strchr that doesn't do the null byte bit!
  */
 static inline char *rele_strchr(char *str, int c) {
@@ -458,29 +547,31 @@ static inline char *rele_strchr(char *str, int c) {
 }
 
 /**
- * My version of casecmp that handles casevar. 
- * 
- * IMPORTANT: we assume s1 is already upper case!
+ * My version of casecmp that hopefully uses a faster tolower() and is written
+ * so that its compiles well on ARM.
  */
-static int rele_strncasecmp(int caseval, char *s1, char *s2, int n) {
-    if (caseval) {
-        while (n--) {
-            if (*s1++ != CASEUP(*s2, caseval)) return 0;
-            s2++;
-        }
-    } else {
-        while (n--) {
-            if (*s1++ != *s2++) return 0;
-        }
+static inline int rele_strncasecmp(const char *s1, const char *s2, int n)
+{
+    while (n--) {
+        unsigned char c1 = fast_tolower((unsigned char)*s1++);
+        unsigned char c2 = fast_tolower((unsigned char)*s2++);
+        if (c1 != c2)
+            return 0;
     }
     return 1;
 }
 
-static char *rele_strfind(int caseval, char *haystack, int hlen, char *needle, int nlen) {
-    while (hlen >= nlen) {
-        if (rele_strncasecmp(caseval, needle, haystack, nlen)) return haystack;
-        haystack++;
-        hlen--;
+// TODO: use a Boyer-Moore-Horspool version of this with a reduced cache
+// can probably get away with 32 bytes.
+static inline char *rele_strifind(const char *haystack, int hlen, const char *needle, int nlen)
+{
+    if (nlen <= 0 || hlen < nlen)
+        return NULL;
+
+    const char *end = haystack + hlen - nlen + 1;
+    for (; haystack < end; haystack++) {
+        if (rele_strncasecmp(haystack, needle, nlen))
+            return (char *)haystack;
     }
     return NULL;
 }
@@ -499,7 +590,7 @@ static char *rele_strfind(int caseval, char *haystack, int hlen, char *needle, i
  * 
  * TODO: caseless
  */
-char *find_string(char *p, char *str, int *len, char *ch, int caseval) {
+char *find_string(char *p, char *str, int *len, char *ch, int icase) {
 	char c;			// single return char
 	int l = 0;		// len tracking
 	int quoted = 0;	// are we in a quoted section
@@ -550,13 +641,13 @@ normal_char:
         // If we are a single char though, we need to return that.
 		if (rele_strchr("+?*", *p)) { 
             if (l) { p--; break; }
-			if (ch) *ch = CASEUP(c, caseval); 
+            if (ch) *ch = icase ? fast_tolower(c) : c;
 			l = 1; break; 
         }
 
 		// So here we think it's valid...
-		if (ch) *ch = CASEUP(c, caseval);
-		if (str) *str++ = CASEUP(c, caseval);
+		if (ch) *ch = icase ? fast_tolower(c) : c;
+		if (str) *str++ = icase ? fast_tolower(c) : c;
 		l++;
 	}
 	if (len) *len = l;
@@ -606,7 +697,12 @@ struct rectx *alloc_ctx(char *regex) {
                 continue;                   // p is already incrememented
 
             // These are always a node...
-            case '+': case '*': case '?':
+            // TODO: DOTSTAR!!!!
+            case '*':
+                if (p > regex && p[-1] == '.') nodes--;
+                // Fall through...
+
+            case '+': case '?':
                 if (p[1] == '?') p++;       // lazy version
                 nodes++;
                 break;
@@ -701,7 +797,7 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
     char        *p = regex;
     struct node *last = NULL;
     int         lazy;
-    int         caseval = (flags & F_CASELESS ? 32 : 0);
+    int         icase = flags & RELE_CASELESS;
 
     // For string finding...
     int         slen;
@@ -713,7 +809,7 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
 
     while (*p) {
         // Start out by seeing if we have a string here ....
-        p = find_string(p, ctx->strings, &slen, &ch, caseval);
+        p = find_string(p, ctx->strings, &slen, &ch, icase);
         if (!p) goto fail;
         if (slen > 1) {
             // TODO: add a string object
@@ -725,7 +821,7 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
         } else if (slen == 1) {
             last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
             if (!last) goto fail;
-            last->ch1 = CASEUP(ch, caseval);
+            last->ch1 = icase ? fast_tolower(ch) : ch;
             continue;
         }
 
@@ -735,7 +831,12 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
                 last = create_node_above(ctx, last, OP_PLUS, NULL, last);
                 goto star_plus_question;
             case '*':
-                last = create_node_above(ctx, last, OP_STAR, NULL, last);
+                if (last && last->op == OP_MATCH && last->ch2 == '.') {
+                    last->op = OP_DOTSTAR;
+//                    last->match = NULL;
+                } else {
+                    last = create_node_above(ctx, last, OP_STAR, NULL, last);
+                }
                 goto star_plus_question;
             case '?':
                 last = create_node_above(ctx, last, OP_QUESTION, NULL, last);
@@ -791,11 +892,16 @@ star_plus_question:
                 }
                 continue;           // p is already incremented
 
+
             case '^':
+                last = create_node_here(ctx, last, OP_ANCHOR, NULL, NULL);
+                last->ch1 = (flags & RELE_NEWLINE) ? '^' : 'A';
+                break;
+
             case '$':
                 last = create_node_here(ctx, last, OP_ANCHOR, NULL, NULL);
-                last->ch1 = *p;
-                break;
+                last->ch1 = (flags & RELE_NEWLINE) ? '$' : 'Z';
+               break;
 
             case '[':
                 last = create_node_here(ctx, last, OP_MATCHSET, NULL, NULL);
@@ -810,7 +916,7 @@ star_plus_question:
             case '.':
                 last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
                 if (!last) goto fail;
-                last->ch2 = '.';
+                last->ch2 = (flags & RELE_NEWLINE) ? ',' : '.';
                 break;
 
             case '\\':
@@ -824,6 +930,8 @@ star_plus_question:
                 switch (*p) {
                     case 0:     goto fail;
                     case 'R':   last->op = OP_CRLF; break;
+                    case 'A':
+                    case 'Z':
                     case 'b':
                     case 'B':   last->op = OP_ANCHOR; last->ch2 = *p; break;
                     default:    last->ch2 = *p; break;  // \w \d etc.
@@ -842,9 +950,12 @@ star_plus_question:
     last = create_node_here(ctx, ctx->root, OP_DONE, NULL, NULL);
 
     // Run the optimisation check...
-    if (NOT_FLAG(flags, F_NO_FASTSTART)) {
+    if (NOT_FLAG(flags, RELE_NO_FASTSTART)) {
         ctx->fast_start = fast_start(ctx);
     }
+
+    optimiser(ctx);
+
     return ctx;
 
 fail:
@@ -858,7 +969,10 @@ fail:
 // -------------------------------------------------------------------------------
 static int matchone(char s, char ch) {
     if (s == '.')   return 1;           // TODO: newlines and stuff
+    // NEED A SPECIAL VERSION OF DOT WHEN MULTILINE THAT DOESN"T MATECH NL ETC
 
+    if (s == ',') return (ch != '\n');
+    
     switch(s) {
         // Types...
         case 'd':       return isdigit(ch);
@@ -867,9 +981,12 @@ static int matchone(char s, char ch) {
         case 'W':       return !isalnum(ch);
         case 's':       return isspace(ch);
         case 'S':       return !isspace(ch);
+
+        // TODO: needs to fail in compile rather than here
+        default:
+                        fprintf(stderr, "unknown matchone s=[%c] ch=[%c]\n", s, ch);
+                        return -1;
     }
-    // TODO: needs to fail in compile rather than here
-    return -1;
 }
 
 // -------------------------------------------------------------------------------
@@ -975,32 +1092,52 @@ int rele_match(struct rectx *ctx, char *p, int len, int flags) {
     struct node *n = ctx->fast_start;
 
         // Used for caseless matching
-    int caseval = (ctx->flags & F_CASELESS ? 32 : 0);
+    int icase = ctx->flags & RELE_CASELESS;
 
     // Now see if we have a faststart option...
     if (n) {
         if (n->op == OP_MATCH) {
-            while (p <= end) {
-                char ch = CASEUP(*p, caseval);
-                if ((n->ch1 && (n->ch1 == ch)) || (!n->ch1 && matchone(n->ch2, ch))) {
+            if (n->ch1) {
+                // Ok, normal char ... need to see if icase or not
+                if (icase) {
+                    for (; p <= end; p++) {
+                        char c1 = fast_tolower(*p);
+                        char c2 = fast_tolower(n->ch1);     // TODO: not sure we need to do this?
+                        if (c1 != c2) continue;
+                    }
+                    if (rele_match_iter(ctx, start, p, end, flags)) return 1;
+                } else {
+                    for (; p <= end; p++) {
+                        p = memchr(p, n->ch1, end - p);
+                        if (!p) return 0;
+                        if (rele_match_iter(ctx, start, p, end, flags)) return 1;
+                    }
+                }
+            } else {
+                // Special char match, performance nightmare...
+                for (; p <= end; p++) {
+                    if (!matchone(n->ch2, *p)) continue;
                     if (rele_match_iter(ctx, start, p, end, flags)) return 1;
                 }
-                p++;
             }
         } else if (n->op == OP_MATCHSTR) {
-            while (p <= end) {
-                p = rele_strfind(caseval, p, end - p, n->string, n->len);
-//                p = memmem(p, end - p, n->string, n->len);
-                if (!p) return 0;
-                if (rele_match_iter(ctx, start, p, end, flags)) return 1;
-                p++;
-            }
-        } else if (n->op == OP_MATCHSET) {
-            while (p <= end) {
-                if (match_set(*p, n->set)) {
+            if (icase) {
+                for (; p <= end; p++) {
+                    p = rele_strifind(p, end - p, n->string, n->len);
+                    if (!p) return 0;
+                    if (rele_match_iter(ctx, start, p, end, flags)) return 1;
+                }                
+            } else {
+                for (; p <= end; p++) {
+                    p = memmem(p, end - p, n->string, n->len);
+                    if (!p) return 0;
                     if (rele_match_iter(ctx, start, p, end, flags)) return 1;
                 }
-                p++;
+            }
+        } else if (n->op == OP_MATCHSET) {
+            for (; p <= end; p++) {
+                if (!match_set(*p, n->set)) continue;
+                if (rele_match_iter(ctx, start, p, end, flags)) return 1;
             }
         } else if (n->op == OP_STAR) {
             if (rele_match_iter(ctx, start, p, end, flags)) return 1;
@@ -1008,13 +1145,12 @@ int rele_match(struct rectx *ctx, char *p, int len, int flags) {
             fprintf(stderr, "WEIRD FAST START\n");
         }
     } else {
-        while (p <= end) {
+        for (; p <= end; p++) {
             if (rele_match_iter(ctx, start, p, end, flags)) return 1;
-            p++;
         }
     }
 
-    if (NOT_FLAG(flags, F_KEEP_TASKS)) {
+    if (NOT_FLAG(flags, RELE_KEEP_TASKS)) {
         while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
     }
     return 0;
@@ -1044,7 +1180,7 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
     struct task *expected;
 
     // Used for caseless matching
-    int caseval = (ctx->flags & F_CASELESS ? 32 : 0);
+    int icase = ctx->flags & RELE_CASELESS;
 
     do {
         // Get ready to run through for this char...
@@ -1053,8 +1189,7 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
         char ch;
         if (p < end) {
-//            ch = ((unsigned)(*p - 'a') <= ('z' - 'a') ? *p - caseval : *p);
-            ch = CASEUP(*p, caseval);
+            ch = (icase ? fast_tolower(*p) : *p);
         } else {
             ch = 0;
         }
@@ -1078,7 +1213,7 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
             struct node *n = t->n;
 
-            // Probablt the most likely...
+            // Probablt the most likely... although less so with OP_MATCHSTR support
             if (n->op == OP_CONCAT) {
                 if (t->last == n->a) goto leg_b;
                 if (t->last == n->b) goto parent;
@@ -1091,12 +1226,9 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
             // Probably the second most likely...
             if (n->op == OP_MATCH) {
                 if (!ch) goto die;      // can't match NULL
-
                 if ((n->ch1 && (n->ch1 == ch)) || (!n->ch1 && matchone(n->ch2, ch))) {
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
-                    t->last = n;
-                    t->n = n->parent;
-                    goto next;
+                    goto match_ok;
                 }
                 goto die;
             }
@@ -1105,8 +1237,11 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                 if (t->last == n->parent) {
                     // Ok, we need to do the comparison, and then either die or setup
                     // to hang around to the right end point.
-                    if (!rele_strncasecmp(caseval, n->string, p, n->len)) goto die;
-//                    if (strncmp(p, n->string, n->len) != 0) goto die;
+                    if (icase) {
+                        if (!rele_strncasecmp(n->string, p, n->len)) goto die;
+                    } else {
+                        if (memcmp(n->string, p, n->len) != 0) goto die;
+                    }
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
                     // We need to stay here
                     t->last = n;                // horrible overloading
@@ -1119,30 +1254,6 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                 }
                 goto next;
             }
-
-            // PROBLEM....
-            //
-            // If we have a + or * or a {x,MAX} then we have unbounded task creation.
-            // If the match is zero length (a? or \b or ^ or something) then we have
-            // infinite task creation (or unbounded, more than we need!)
-            //
-            // At +
-            //.   we go down and if we, or any of our children, come back up with
-            //    no matches, then we need to take action.
-            //
-            //    the issue is that there are other tasks that could be down in
-            //.   the subtree, they could come up and match p or however we are
-            //.   tracking.
-            //
-            //.   is there a way of tracking parent tasks, by recording the next
-            //.   task on the list and incrementing iter when that task starts?
-            //.   that way any children wouldn't cause an iter increase and would
-            //.   still be caught by the iter check
-            //
-            //
-
-
-
 
 
             // If we get here from above, then go down the b leg. If we get here
@@ -1176,6 +1287,31 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                     n->iter = iter;
                 }
                 goto new_b_or_parent;
+            }
+
+            if (n->op == OP_DOTSTAR) {
+                if (t->last == n->parent) {
+
+                }
+                if (t->last == NULL) {
+                    // Special case, we spawned to come here as a matcher...
+                    if (!ch) goto die;
+                    t->last = n;
+                    goto next;
+                }
+                // TODO: lazy version
+                // greedy -- Spawn a new child to go back up...
+                // and we also go backup but to next task, since we're a match.
+
+                if (n->lazy) {
+                    t->next = task_new(ctx, t, t->next, NULL, n);
+                    goto parent;
+                } else {
+                    t->next = task_new(ctx, t, t->next, n, n->parent);
+                    if (!ch) goto die;      // can't match NULL
+                    t->last = n;
+                    goto next;
+                }
             }
 
 from_GROUP:
@@ -1263,16 +1399,24 @@ from_GROUP:
                                         goto parent;
                                     }
                                     goto die;
+                    case 'A':       if (p == start) goto parent;
+                                    goto die;
+                    case 'Z':       if (p == end) goto parent;
+                                    goto die;
+
                     case '^':       if (p == start) goto parent; 
+                                    if (p[-1] == '\n') goto parent;
                                     goto die;
                     case '$':       if (p == end) goto parent;
+                                    if (*p == '\n') goto parent;
                                     goto die;
                     default:        goto die;       // shouldn't happen
 
                 }
             }
 
-
+            // TODO: ch is already lower() if icase, which is a waste
+            //       could we do it later/here?
             if (n->op == OP_MATCHSET) {
                 if (match_set(ch, n->set)) {
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
@@ -1283,10 +1427,54 @@ from_GROUP:
                 goto die;
             }
 
+            if (n->op == OP_MATCHGRP) {
+                if (t->last == n->parent) {
+                    // Ok, we need to do the comparison, and then either die or setup
+                    // to hang around to the right end point.
+                    int len = t->grp[n->mgrp].rm_eo - t->grp[n->mgrp].rm_so;
+                    char *grpstr = start + t->grp[n->mgrp].rm_so;
+                    
+                    // A zero length group match is a ghost match...
+                    if (!len) goto parent;
+
+                    // One char match is simple
+                    if (len == 1) {
+                        if (icase) {
+                            if (fast_tolower(*grpstr) != fast_tolower(*p)) goto die;
+                        } else {
+                            if (*grpstr != *p) goto die;
+                        }
+                        if (has_prior_match(ctx, run_list, n, t)) goto die;
+                        goto match_ok;
+                    }
+
+                    // Otherwise see if match... TODO: this is an issue because the first
+                    // group match won't be all in upper if case insensitive!!!
+                    if (icase) {
+                        if (!rele_strncasecmp(grpstr, p, len)) goto die;
+                    } else {
+                        if (memcmp(grpstr, p, len) != 0) goto die;
+                    }
+                    if (has_prior_match(ctx, run_list, n, t)) goto die;
+                    // We need to stay here
+                    t->last = n;                // horrible overloading
+                    t->p = p + len - 1;
+                    goto next;
+                }
+                if (p == t->p) goto match_ok;
+                goto next;
+            }
+
             // Match a previous group, coming from the top we initialise then stay
             // here iterating... originally we used a separate variable, but a stack
             // item should be fine.
-            if (n->op == OP_MATCHGRP) {
+            /*
+                if (n->op == OP_MATCHGRP) {
+                // TODO TODO TODO
+                //
+                // Switch this to the same model used in the string match
+                // will simplify and speed up.
+                //
                 if (t->last == n->parent) {
                     // A zero length group match is a ghost match...
                     if (t->grp[n->mgrp].rm_so == t->grp[n->mgrp].rm_eo) {
@@ -1317,6 +1505,7 @@ from_GROUP:
                 }
                 goto die;
             }
+            */
 
             // If we come from above then get a new stack position and init, otherwise
             // count until we hit min, then spawn until max...
@@ -1403,6 +1592,10 @@ parent:             t->n = n->parent;
                     t->last = n;
                     continue;
 
+match_ok:           t->n = n->parent;
+                    t->last = n;
+                    // fall through...
+
 next:               prev = t;
                     t = t->next;
                     continue;
@@ -1451,6 +1644,7 @@ char *opmap(uint8_t op) {
         case OP_MATCHSTR:   return "MATCHSTR";
         case OP_CRLF:       return "CRLF";
         case OP_ANCHOR:     return "ANCHOR";
+        case OP_DOTSTAR:    return "DOTSTAR";
         default:            return "UNKNOWN";
     }
 }
@@ -1496,6 +1690,15 @@ void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
 
         case OP_ANCHOR:
             fprintf(f, "'%c'", n->ch1);
+            GEND;
+            return;
+
+        case OP_DOTSTAR:
+            if (n->match) {
+                fprintf(f, "[SRCH NODE %d]", NODE_ID(ctx, n->match));
+            } else {
+                fprintf(f, "none");
+            }
             GEND;
             return;
 

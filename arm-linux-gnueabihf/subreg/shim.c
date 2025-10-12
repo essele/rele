@@ -23,7 +23,7 @@ static int subr_match(char *text, int flags) {
 	last_input = text;
 	capture_count = subreg_match(last_regex, text, captures, SUBR_MAX_GROUPS, 128);
 	if (capture_count < 0) {
-		fprintf(stderr, "SUBREG error: %d\n", capture_count);
+//		fprintf(stderr, "SUBREG error: %d\n", capture_count);
 		return 0;		// error
 	}
 	if (capture_count == 0) {

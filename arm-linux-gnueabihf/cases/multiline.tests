@@ -1,0 +1,13 @@
+
+
+#
+# Should find a line that ends with fred in a multi line input
+#
+N:multiline1
+/^.*fred$
+CF:NEWLINE
+T:blah blah blah
+T:sdkjfh dsfjkh fred
+T:another line here
+0:15,33
+
