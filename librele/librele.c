@@ -408,6 +408,8 @@ struct node *optimiser(struct rectx *ctx) {
             case OP_CRLF:
                 goto parent;
 
+            // TODO: If we have concurrent dotstar's can we somehow inherit
+            // the match? Not sure if easy or possible? or sensible.
             case OP_DOTSTAR:
                 dotstar = n;
                 dotstar->match = NULL;
@@ -425,8 +427,22 @@ struct node *optimiser(struct rectx *ctx) {
                 goto leg_a;
 
             case OP_QUESTION:
+                dotstar = NULL;
                 if (last == n->b) goto parent;
                 goto leg_b;
+
+            // If we're coming up from a plus then we can't continue with the
+            // dotstar search as the next match could be a repeat of whatever is below.
+            // Going down into a plus is fine, as whatever is below will need to match.
+            case OP_PLUS:
+                if (last == n->b) { dotstar = NULL; goto parent; }
+                goto leg_b;
+
+            // Either way on a star kills the dotstar search...
+            case OP_STAR:
+                dotstar = NULL;
+                if (last == n->b) goto parent;
+                goto leg_b;                
 
             case OP_GROUP:
                 if (n->b == NOTUSED) goto parent;
@@ -1241,6 +1257,7 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                         if (!rele_strncasecmp(n->string, p, n->len)) goto die;
                     } else {
                         if (memcmp(n->string, p, n->len) != 0) goto die;
+//                        fprintf(stderr, "Have string match [%.*s]\n", n->len, n->string);
                     }
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
                     // We need to stay here
@@ -1290,11 +1307,31 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
             }
 
             if (n->op == OP_DOTSTAR) {
-                if (t->last == n->parent) {
-
+                // Let's handle the match case first...
+                if (n->match && n->match->op == OP_MATCHSTR) {
+                    if (t->last == n->parent) {
+                        // If we have a match, then we can try to match it.
+                        t->p = memmem(p, (size_t)(end - p), n->match->string, n->match->len);
+                        if (!t->p) goto die;        // we'll never match the next match
+                        // If we did match then we need to wait here for it...
+                        goto next;
+                    } else {
+                        // We are waiting...
+                        if (p == t->p) {
+                            // We matched, but there might be more, if greedy then we
+                            // spawn a child to go up, and we come back here as if from the
+                            // parent
+                            // TODO: what does lazy mean in this context...
+                            t->next = task_new(ctx, t, t->next, n, n->parent);
+                            t->last = n->parent;
+                            goto next;
+                        }
+                        goto next;
+                    }
                 }
+
                 if (t->last == NULL) {
-                    // Special case, we spawned to come here as a matcher...
+                    // Special lazy case, we spawned to come here as a matcher...
                     if (!ch) goto die;
                     t->last = n;
                     goto next;

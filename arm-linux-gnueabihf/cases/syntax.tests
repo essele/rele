@@ -21,6 +21,27 @@ T:hereabcthere
 0: 4,7
 1: 4,7
 
+N:simpledotstar
+/.*abc
+T:somenewabnotuntilabcmore
+0:0,20
+
+N:dotstar2
+/.*abc\d
+T:somethingabcXnotabcYthenabc1xx
+0:0,28
+
+N:dotstargreedy
+/.*abc\d
+T:oneabc1twoabc2threeabc3xx
+0:0,23
+
+N:dotstarlazy
+/.*?abc\d
+T:oneabc1twoabc2threeabc3xx
+0:0,7
+
+
 N:another
 /(.*)(abc)(.*)
 T:hereabcthere
