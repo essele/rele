@@ -449,6 +449,13 @@ struct node *optimiser(struct rectx *ctx) {
                 if (last == n->b) goto parent;
                 goto leg_b;
 
+            // If we come up then we need to kill the dotstar, but going down is fine
+            // if min > 0.
+            case OP_MULT:
+                if (last == n->b) { dotstar = NULL; goto parent; }
+                if (n->min == 0) dotstar = NULL;
+                goto leg_b;
+
             case OP_DONE:
                 goto done;
 
@@ -640,7 +647,7 @@ char *find_string(char *p, char *str, int *len, char *ch, int icase) {
 								quoted = 1;
 								continue;
 
-				case 'x':		c = 'A'; break;		// TODO handle hex
+				case 'x':		c = tohex(p+2); p += 2; break;		// TODO handle hex errors
 				case 'n':		c = '\n'; break;
 				case 't':		c = '\t'; break;
 				case ',':		c = ','; break;
@@ -1308,6 +1315,7 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
             if (n->op == OP_DOTSTAR) {
                 // Let's handle the match case first...
+                // TODO: need to handle OP_MATCH and others... and icase etc.
                 if (n->match && n->match->op == OP_MATCHSTR) {
                     if (t->last == n->parent) {
                         // If we have a match, then we can try to match it.
@@ -1318,17 +1326,31 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                     } else {
                         // We are waiting...
                         if (p == t->p) {
-                            // We matched, but there might be more, if greedy then we
-                            // spawn a child to go up, and we come back here as if from the
-                            // parent
-                            // TODO: what does lazy mean in this context...
-                            t->next = task_new(ctx, t, t->next, n, n->parent);
-                            t->last = n->parent;
-                            goto next;
+                            if (n->lazy) {
+                                // We need to spawn a child to look for longer matches
+                                // (lower priority) and then we can go up and deal with
+                                // the one we've found.
+                                t->next = task_new(ctx, t, t->next, n->parent, n);
+                                goto parent;
+                            } else {
+                                // Spawn child to go up and deal with the match, but
+                                // we stay here because longer ones are more important.
+                                t->next = task_new(ctx, t, t->next, n, n->parent);
+                                t->last = n->parent;
+                                goto next;
+                            }
                         }
                         goto next;
                     }
                 }
+                // Default case ... act as a normal .* and .*?
+                //
+                // Greedy ... spawn child to go to parent, we stay here just check for null.
+                // Lazy ... spawn child to stay here, we got to parent
+                //
+                // TODO: this must be able to be cleaning, hate the NULL t->last idea!
+                //
+                // Walk this through from an old .* mechanism and see what happends.
 
                 if (t->last == NULL) {
                     // Special lazy case, we spawned to come here as a matcher...
@@ -1336,10 +1358,6 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                     t->last = n;
                     goto next;
                 }
-                // TODO: lazy version
-                // greedy -- Spawn a new child to go back up...
-                // and we also go backup but to next task, since we're a match.
-
                 if (n->lazy) {
                     t->next = task_new(ctx, t, t->next, NULL, n);
                     goto parent;
