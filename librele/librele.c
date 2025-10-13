@@ -1307,32 +1307,24 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
             }
 
             if (n->op == OP_DOTSTAR) {
-
-                // TODO: put the NULL bit here and it can be consistent across
-                // the different matches (only used in lazy mode)
+                // If t->last is NULL, then we are a lazy sub-task...
+                if (t->last == NULL) {
+                    if (!ch) goto die;
+                    t->last = n->parent;
+                    goto next;
+                }
 
                 // Let's handle the match case first...
                 if (n->match) {
                     if (t->last == n->parent) {
-                        fprintf(stderr, "looking for match at %p (%c)\n", p, *p);
                         t->p = next_match(n->match, start, p, end, icase, t);
                         if (!t->p) goto die;
                         t->last = n;
                         goto next;
                     } else {
                         // If we get here then we've got to the start of the match
-                        fprintf(stderr, "caught up %p (%c)\n", p, *p);
-                        // We need this extra delay in a lazy version so we don't recheck
-                        // the match at the same point ... horrible, must be a cleaner way!
-                        if (t->last == NULL) {
-                            if (!ch) goto die;
-                            t->last = n->parent;
-                            goto next;
-                        }
                         if (n->lazy) {
-                            // Weird ... we kind of need to skip one char here!
                             t->next = task_new(ctx, t, t->next, NULL, n);
-//                            t->next = task_new(ctx, t, t->next, n->parent, n);
                             goto parent;
                         } else {
                             t->next = task_new(ctx, t, t->next, n, n->parent);
@@ -1342,27 +1334,12 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                     }
                 }
                 // Default case ... act as a normal .* and .*?
-                //
-                // Greedy ... spawn child to go to parent, we stay here just check for null.
-                // Lazy ... spawn child to stay here, we got to parent
-                //
-                // TODO: this must be able to be cleaning, hate the NULL t->last idea!
-                //
-                // Walk this through from an old .* mechanism and see what happends.
-
-                if (t->last == NULL) {
-                    // Special lazy case, we spawned to come here as a matcher...
-                    if (!ch) goto die;
-                    t->last = n;
-                    goto next;
-                }
                 if (n->lazy) {
-                    fprintf(stderr, "Lazy spawn (p=%p)\n", p);
                     t->next = task_new(ctx, t, t->next, NULL, n);
                     goto parent;
                 } else {
                     t->next = task_new(ctx, t, t->next, n, n->parent);
-                    if (!ch) goto die;      // can't match NULL
+                    if (!ch) goto die;
                     t->last = n;
                     goto next;
                 }
