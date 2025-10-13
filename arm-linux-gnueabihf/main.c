@@ -99,7 +99,9 @@ uint32_t time_match(struct engine *eng, char *regex, int cflags, char *text, int
     uint64_t sum = 0;
     int32_t i = 0;
 
-    eng->compile(regex, cflags);
+    if (!eng->compile(regex, cflags)) {
+        fprintf(stderr, "Compile failed\n");
+    }
     while (sum < MAX_ALLOWED_NS && i < MAX_ITERATIONS) {
         clock_gettime(CLOCK_MONOTONIC, &start);
         eng->match(text, mflags);
@@ -230,6 +232,7 @@ int main(int argc, char *argv[]) {
                 match_rc = test_match(eng, test->regex, test->cflags, test->text, 0, &mem);
                 fprintf(stderr, "Engine: %s match=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
                                             match_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
+
 
                 if (match_rc && cf_show_matches) {
                     // We need to run another compile/match as we will have been freed by the above...

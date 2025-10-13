@@ -1,0 +1,47 @@
+
+#
+# See if we match the trailing anchor in one go!
+#
+N:nm1
+/.*$
+GEN:random,256K
+0: 0,262144
+
+#
+# See if we match properly against newlines
+#
+N:nm2
+/^x$
+CF:NEWLINE
+J:NL
+T:one
+T:two
+T:three
+T:x
+T:other
+0:14,15
+
+#
+# CHeck lazy is working after a dotstar
+# 
+N:nm3
+/.*?abc\d
+T:helloabcgoodbyeabc1newabc2blah
+0:0,19
+
+#
+# Check non-lazy version of above
+#
+N:nm4
+/.*abc\d
+T:helloabcgoodbyeabc1newabc2blah
+0:0,26
+
+#
+# Do we match the end of the string?
+#
+N:nm5
+/.*?$
+T:sdfjkhsdfkjh
+0:0,12
+

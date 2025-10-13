@@ -33,14 +33,13 @@ T:somethingabcXnotabcYthenabc1xx
 
 N:dotstargreedy
 /.*abc\d
-T:oneabc1twoabc2threeabc3xx
+T:oneabc1twoabc2threeabc3xxxx
 0:0,23
 
 N:dotstarlazy
 /.*?abc\d
 T:oneabc1twoabc2threeabc3xx
 0:0,7
-
 
 N:another
 /(.*)(abc)(.*)

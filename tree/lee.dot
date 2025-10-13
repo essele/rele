@@ -1,41 +1,25 @@
 digraph tree {
-    n0xb3c46e557400 [label="(9)
+    n0xc07a5c0fa380 [label="(5)
 CONCAT
 "];
-    n0xb3c46e557400 -> n0xb3c46e5572e0 [label="a"];
-    n0xb3c46e5572e0 [label="(0)
+    n0xc07a5c0fa380 -> n0xc07a5c0fa2e0 [label="a"];
+    n0xc07a5c0fa2e0 [label="(0)
 GROUP
 0"];
-    n0xb3c46e5572e0 -> n0xb3c46e557360 [label="b"];
-    n0xb3c46e557360 [label="(4)
+    n0xc07a5c0fa2e0 -> n0xc07a5c0fa340 [label="b"];
+    n0xc07a5c0fa340 [label="(3)
 CONCAT
 "];
-    n0xb3c46e557360 -> n0xb3c46e557300 [label="a"];
-    n0xb3c46e557300 [label="(1)
-GROUP
-1"];
-    n0xb3c46e557300 -> n0xb3c46e557320 [label="b"];
-    n0xb3c46e557320 [label="(2)
+    n0xc07a5c0fa340 -> n0xc07a5c0fa300 [label="a"];
+    n0xc07a5c0fa300 [label="(1)
 DOTSTAR
-none"];
-    n0xb3c46e557360 -> n0xb3c46e5573c0 [label="b"];
-    n0xb3c46e5573c0 [label="(7)
-CONCAT
-"];
-    n0xb3c46e5573c0 -> n0xb3c46e557340 [label="a"];
-    n0xb3c46e557340 [label="(3)
-GROUP
-2"];
-    n0xb3c46e557340 -> n0xb3c46e557380 [label="b"];
-    n0xb3c46e557380 [label="(5)
-DOTSTAR
-[SRCH NODE 6]"];
-    n0xb3c46e5573c0 -> n0xb3c46e5573a0 [label="b"];
-    n0xb3c46e5573a0 [label="(6)
-MATCHSTR
-'fredABC'"];
-    n0xb3c46e557400 -> n0xb3c46e5573e0 [label="b"];
-    n0xb3c46e5573e0 [label="(8)
+[SRCH NODE 2]"];
+    n0xc07a5c0fa340 -> n0xc07a5c0fa320 [label="b"];
+    n0xc07a5c0fa320 [label="(2)
+ANCHOR
+'Z'"];
+    n0xc07a5c0fa380 -> n0xc07a5c0fa360 [label="b"];
+    n0xc07a5c0fa360 [label="(4)
 DONE
 "];
 }

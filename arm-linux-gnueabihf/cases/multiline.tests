@@ -11,3 +11,14 @@ T:sdkjfh dsfjkh fred
 T:another line here
 0:15,33
 
+N:matchacross
+/abc.*def
+J:CR
+T:hello abc sdf def sdf
+T:multi-line dsdf
+T:with abc on this one
+T:some more
+T:and def on this one
+T:last one
+0:6,76
+

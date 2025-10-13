@@ -21,9 +21,11 @@ enum {
     // Order in terms of liklihood
     OP_CONCAT,
     OP_MATCH,
+    OP_MATCHSTR,
 
     OP_PLUS,
     OP_STAR,
+    OP_DOTSTAR,
     OP_QUESTION,
 
     OP_GROUP,
@@ -34,7 +36,7 @@ enum {
     OP_MATCHGRP,
     OP_MULT, 
     OP_CRLF,
-
+ 
     OP_DONE,
 };
 
@@ -47,20 +49,23 @@ enum {
 
 struct node {
     union {
-       struct node      *a;             // the first child
-       struct {
+        struct node      *a;            // the first child
+        struct {
             uint16_t    min;
             uint16_t    max;
         };
-       uint8_t          group;          // for creating groups
+        int             len;            // for string matches
+        uint8_t         group;          // for creating groups
     };
     union {
         struct node     *b;             // the second child
         struct set      *set;           // a possible set match
+        char            *string;        // a possible string match
+        struct node     *match;         // a DOTSTAR next match node
         uint8_t         mgrp;           // a possible group match
         struct {
-            char            ch1;            // normal char
-            char            ch2;            // other case, or special char
+            char            ch1;        // normal char
+            char            ch2;        // or special char
         };
     };
     struct node         *parent;        // for a way back
@@ -84,6 +89,7 @@ struct rectx {
 
     struct node     *nodes;         // current node pointer
     struct set      *sets;          // current set pointer
+    char            *strings;       // for string matches
 
     struct task     *free_list;     // free tasks list
     struct task     *done;          // the candiate completed task
@@ -101,6 +107,7 @@ struct rectx {
 #define HAS_FLAG(v, f)           (v & f)
 
 #define NODE_ID(ctx, n)          (int)(((void *)n - ((void *)ctx + sizeof(struct rectx)))/sizeof(struct node))
+
 
 static struct node *create_node_above(struct rectx *ctx, struct node *this, uint8_t op, struct node *a, struct node *b) {
     struct node *parent = this->parent;
@@ -203,6 +210,10 @@ struct set {
     uint32_t d[4];
 };
 
+//
+// TODO: if caseless, just put lowercase stuff in!
+// TODO: do we need to support hex to hex [0x30-0x39] ??
+//
 static char *build_set(struct rectx *ctx, char *p, struct node *n) {
     // "Allocate" the space...
     struct set *set = ctx->sets++;
@@ -222,7 +233,7 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
         if (*p == ']') break;           // done
         if (p[1] == '-' && p[2] && p[2] != ']') {
             if (p[0] > p[2]) goto fail;
-            if (ctx->flags & F_CASELESS) {
+            if (ctx->flags & RELE_CASELESS) {
                 SET_CASELESS_RANGE(p[0], p[2]);
             } else {
                 SET_RANGE(p[0], p[2]);
@@ -244,7 +255,7 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
                     default:    SET_VAL(*p); break;
                 }
             } else {
-                if (ctx->flags & F_CASELESS) {
+                if (ctx->flags & RELE_CASELESS) {
                     SET_CASELESS_VAL(*p);
                 } else {
                     SET_VAL(*p);
@@ -260,7 +271,7 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
         set->d[3] = ~set->d[3];
     }
     n->set = set;
-    return p;
+    return ++p;                 // get past the close bracket
 
 fail:
     return NULL;
@@ -283,7 +294,7 @@ char *dummy_set(char *p) {
             p++;
         }
     }
-    return p;
+    return ++p;         // get past the close bracket
 }
 
 static inline int match_set(char ch, struct set *set) {
@@ -325,7 +336,7 @@ done:
         n->min = min;
         n->max = max;
     }
-    return p;
+    return ++p;         // get past the bracket
 }
 
 // Check if a string could be a group identifier, these can be...
@@ -352,7 +363,7 @@ int is_group(char *p, uint8_t *gid, char **newp, char **errp) {
     }
     // Was a group...
     if (gid) *gid = (uint8_t)group;
-    if (newp) *newp = p-1;              // need to point at the last char of it.
+    if (newp) *newp = p;
     return 1;
 
 error:
@@ -372,6 +383,107 @@ static inline int hexval(unsigned char c) {
 static inline int tohex(const char *p) {
     return (hexval(p[0]) << 4) | hexval(p[1]);
 }
+
+// ------------------------------------------------------------------------
+// NEW WORK ON DOTSTAR
+//
+// Walk the tree, and update dotstar optimisation if we can, in an ideal
+// world, we might also be able to use this for faststart.
+// ------------------------------------------------------------------------
+struct node *optimiser(struct rectx *ctx) {
+    struct node *n = ctx->root;
+    struct node *dotstar = NULL;
+    struct node *last = NULL;
+
+    while (n) {
+        switch (n->op) {
+            case OP_MATCH:
+            case OP_MATCHSTR:
+                if (dotstar) { dotstar->match = n; dotstar = NULL; }
+                goto parent;
+
+            case OP_MATCHGRP:
+            case OP_MATCHSET:
+            case OP_ANCHOR:
+            case OP_CRLF:
+                goto parent;
+
+            // TODO: If we have concurrent dotstar's can we somehow inherit
+            // the match? Not sure if easy or possible? or sensible.
+            // TODO: DOTPLUS ... basically a dotstar but can't be zero??
+            case OP_DOTSTAR:
+                dotstar = n;
+                dotstar->match = NULL;
+                goto parent;
+
+            case OP_CONCAT:
+                if (last == n->a) goto leg_b;
+                if (last == n->b) goto parent;
+                goto leg_a;
+
+            case OP_ALTERNATE:
+                dotstar = NULL;
+                if (last == n->a) goto leg_b;
+                if (last == n->b) goto parent;
+                goto leg_a;
+
+            case OP_QUESTION:
+                dotstar = NULL;
+                if (last == n->b) goto parent;
+                goto leg_b;
+
+            // If we're coming up from a plus then we can't continue with the
+            // dotstar search as the next match could be a repeat of whatever is below.
+            // Going down into a plus is fine, as whatever is below will need to match.
+            case OP_PLUS:
+                if (last == n->b) { dotstar = NULL; goto parent; }
+                goto leg_b;
+
+            // Either way on a star kills the dotstar search...
+            case OP_STAR:
+                dotstar = NULL;
+                if (last == n->b) goto parent;
+                goto leg_b;                
+
+            case OP_GROUP:
+                if (n->b == NOTUSED) goto parent;
+                if (last == n->b) goto parent;
+                goto leg_b;
+
+            // If we come up then we need to kill the dotstar, but going down is fine
+            // if min > 0.
+            case OP_MULT:
+                if (last == n->b) { dotstar = NULL; goto parent; }
+                if (n->min == 0) dotstar = NULL;
+                goto leg_b;
+
+            case OP_DONE:
+                goto done;
+
+            default:
+                fprintf(stderr, "INVALID OP: %d\n", n->op);
+                return NULL;
+    
+
+leg_a:      last = n;
+            n = n->a;
+            continue;
+
+leg_b:      last = n;
+            n = n->b;
+            continue;
+
+parent:     last = n;
+            n = n->parent;
+            continue;
+
+        }
+done:       break;
+    }
+    return NULL;
+}
+
+
 
 // ------------------------------------------------------------------------
 // Optimisation detector...
@@ -396,6 +508,7 @@ struct node *fast_start(struct rectx *ctx) {
                 if (n->ch2 == '.')  return NULL;    // match any makes no sense
                 return n;
 
+            case OP_MATCHSTR:
             case OP_MATCHSET:       return n;       // this should be fine
 
             // For a star we only support a .* construct to avoid running
@@ -415,6 +528,7 @@ struct node *fast_start(struct rectx *ctx) {
             case OP_MULT:           if (n->min > 0) n = n->b; continue;
 
             // None of these are viable...
+            case OP_DOTSTAR:
             case OP_ALTERNATE:
             case OP_ANCHOR:
             case OP_CRLF:
@@ -431,19 +545,168 @@ struct node *fast_start(struct rectx *ctx) {
     return NULL;        // shouldn't get here
 }
 
+/**
+ * Some utility functions
+ */
+
+ /**
+  * A fast tolower() implementation, should be branch-free on ARM...
+  */
+static inline unsigned char fast_tolower(unsigned char c)
+{
+    // If 'A' <= c <= 'Z', set bit 5 (0x20), else leave unchanged
+    unsigned char is_upper = (unsigned)((c - 'A') <= ('Z' - 'A'));
+    return c + (is_upper * 32);
+}
+
+/**
+ * My version of strchr that doesn't do the null byte bit!
+ */
+static inline char *rele_strchr(char *str, int c) {
+	while (*str) {
+		if (*str == c) return str;
+		str++;
+	}
+	return NULL;
+}
+
+/**
+ * My version of casecmp that hopefully uses a faster tolower() and is written
+ * so that its compiles well on ARM.
+ */
+static inline int rele_strncasecmp(const char *s1, const char *s2, int n)
+{
+    while (n--) {
+        unsigned char c1 = fast_tolower((unsigned char)*s1++);
+        unsigned char c2 = fast_tolower((unsigned char)*s2++);
+        if (c1 != c2)
+            return 0;
+    }
+    return 1;
+}
+
+// TODO: use a Boyer-Moore-Horspool version of this with a reduced cache
+// can probably get away with 32 bytes.
+static inline char *rele_strifind(const char *haystack, int hlen, const char *needle, int nlen)
+{
+    if (nlen <= 0 || hlen < nlen)
+        return NULL;
+
+    const char *end = haystack + hlen - nlen + 1;
+    for (; haystack < end; haystack++) {
+        if (rele_strncasecmp(haystack, needle, nlen))
+            return (char *)haystack;
+    }
+    return NULL;
+}
+
+/**
+ * Looks for a string of non-special chars that can form a string that we can
+ * search for quickly. Returns a new p, and optionally copies into cpy and
+ * puts a length in len.
+ * 
+ * TODO: at the moment this joins quoted strings with normal text which is
+ *       great unless there is a + or something after the quoted string
+ *       in which case we end up plussing the whole thing.
+ *       Easy option would be to treat quoted strings as individual items
+ *       then perhaps look for options to merge strings if they are just
+ *       concatenated? 
+ */
+char *find_string(char *p, char *str, int *len, char *ch, int icase) {
+	char c;			// single return char
+	int l = 0;		// len tracking
+	int quoted = 0;	// are we in a quoted section
+
+	while (*p) {
+		// First deal with the quoted situation...
+		if (quoted) {
+			if (!*p) goto error;
+			if (*p == '\\') {
+				if (!p[1]) goto error;			// end after a backslash
+				if (p[1] == 'E') { quoted = 0; p += 2; continue; }
+			}
+			goto normal_char;
+		}
+
+		// Do we need to end the current run...
+		// Basic chars first...
+		if (rele_strchr(".+?*|()[]{}^$", p[0])) break;
+
+		// Then backslash variants...
+		if (*p == '\\') {
+			if (rele_strchr("dDwWsSbBRg{1234567890", p[1])) break;
+			if (!p[1]) goto error;
+		}
+
+		// Ok, at this point we are fairly sure the character is valid, lets
+		// figure out what it is...
+		if (*p == '\\') {
+			switch (p[1]) {
+				case 'Q':		p += 2;			// point at first char of quote
+								quoted = 1;
+								continue;
+
+				case 'x':		c = tohex(p+2); p += 2; break;		// TODO handle hex errors
+				case 'n':		c = '\n'; break;
+				case 't':		c = '\t'; break;
+				case ',':		c = ','; break;
+				default:	fprintf(stderr, "unknown backslash [%c]\n", p[1]); goto error;
+			}
+			p += 2;
+		} else {
+normal_char:
+			c = *p++;
+		}
+
+		// Ok, so we have a candidate char, we need to make sure it's not followed
+		// by something that would cause a problem (+?*), if so we need to roll it back.
+        // If we are a single char though, we need to return that.
+		if (rele_strchr("+?*", *p)) { 
+            if (l) { p--; break; }
+            if (ch) *ch = icase ? fast_tolower(c) : c;
+			l = 1; break; 
+        }
+
+		// So here we think it's valid...
+		if (ch) *ch = icase ? fast_tolower(c) : c;
+		if (str) *str++ = icase ? fast_tolower(c) : c;
+		l++;
+	}
+	if (len) *len = l;
+	return p;
+
+error:
+	return NULL;
+}
+
 
 // ------------------------------------------------------------------------
 // Dummy (and hopefully fast) version of the compiler that is purely used
 // to measure how many nodes and sets this regex will need and then allocate
 // the memory used for both in a single block.
 // ------------------------------------------------------------------------
-struct rectx *alloc_ctx(char *regex) {
+struct rectx *alloc_ctx(char *regex, int flags) {
     int matches = 0;
     int nodes = 0;
     int sets = 0;
+    int strings = 0;
+    int slen;
 
     char *p = regex;
     while (*p) {
+        // Start out by seeing if we have a string here ....
+        p = find_string(p, NULL, &slen, NULL, 0);
+        if (!p) return NULL;
+        if (slen > 1) {
+            matches++;
+            strings += slen;
+            continue;
+        } else if (slen == 1) {
+            matches++;
+            continue;
+        }
+        // Otherwise we can deal with everything else...
+
         // There's always a match at the end of a given brach, therefore matches
         // are the key. We will always have one less "splits" (i.e. concat or 
         // alternate) than we have matches, everything else is always a node.
@@ -451,10 +714,16 @@ struct rectx *alloc_ctx(char *regex) {
             case '{':
                 p = minmax(p, NULL);
                 if (!p) return NULL;        // min max error
-                // drop through...
+                if (*p == '?') p++;         // lazy version
+                nodes++;
+                continue;                   // p is already incrememented
 
             // These are always a node...
-            case '+': case '*': case '?':
+            case '*':
+                if (p > regex && p[-1] == '.' && NOT_FLAG(flags, RELE_NEWLINE)) nodes--;     // DOTSTAR
+                // Fall through...
+
+            case '+': case '?':
                 if (p[1] == '?') p++;       // lazy version
                 nodes++;
                 break;
@@ -473,36 +742,33 @@ struct rectx *alloc_ctx(char *regex) {
                 p = dummy_set(p);
                 if (!p) return NULL;        // set error (not impl)
                 sets++;
-                // drop through
+                matches++;
+                continue;                   // p will already be incremented
 
             // These are effectively matches...
             case '^': case '$':
                 matches++;
                 break;
 
-            default:
-                // Handle the \Q..\E case....
-                if (p[0] == '\\' && p[1] == 'Q') {
-                    p++;    // on the Q
-                    while (p[1] && !(p[1] == '\\' && p[2] == 'E')) {
-                        p++;
-                        matches++;
-                    }
-                    if (!p[1]) return NULL;       // no end to \Q..\E
-                    p += 2;
-                    break;
-                }
-
+            // With the new approach to strings, this can only be a few things
+            // anchors, CRLF, \d, \w etc, dot, and group references
+            case '.':
                 matches++;
-                if (*p == '\\') {
-                    if (is_group(p+1, NULL, &p, NULL)) {
-                        if (!p) return NULL;                                  
-                    } else if (p[1] == 'x') {
-                        p += 3;
-                    } else {
-                        p++;        // move past the backslash
-                    }
+                break;
+
+            case '\\':
+                p++;
+                matches++;
+                if (!*p) return NULL;
+                if (is_group(p, NULL, &p, NULL)) {
+                    if (!p) return NULL;        // group syntax error
+                    continue;                   // p will be correct
                 }
+                break;
+                
+            default:
+                fprintf(stderr, "Unknown char in compile (pass1) [%c]\n", *p);
+                return NULL;
         }
         p++;
     }
@@ -513,22 +779,25 @@ struct rectx *alloc_ctx(char *regex) {
     //nodes += matches + splits + 6;
     nodes += matches + splits + 3;
 
+    // Allow an extra char...
+    strings++;
+
 //    fprintf(stderr, "Matches = %d, Splits = %d, Nodes = %d\n", matches, splits, nodes);
 
     struct rectx *ctx = malloc(sizeof(struct rectx) +
                                 (nodes * sizeof(struct node)) + 
-                                (sets * sizeof(struct set)));
+                                (sets * sizeof(struct set)) + strings);
     if (!ctx) return NULL;
 
     memset(ctx, 0, sizeof(struct rectx) +
                                 (nodes * sizeof(struct node)) + 
-                                (sets * sizeof(struct set)));
+                                (sets * sizeof(struct set)) + strings);
 
     ctx->nodes = (struct node *)((void *)ctx + sizeof(struct rectx));
     ctx->sets = (struct set *)((void *)ctx + (sizeof(struct rectx) + (nodes * sizeof(struct node))));
+    ctx->strings = (void *)ctx->sets + (sets * sizeof(struct set));
     return ctx;
 }
-
 
 // ------------------------------------------------------------------------
 // Simple compiler that turns a regular expression into a binary tree
@@ -537,7 +806,7 @@ struct rectx *alloc_ctx(char *regex) {
 struct rectx *rele_compile(char *regex, uint32_t flags) {
     // First allocate the ctx structure including nodes and sets based on
     // the regex
-    struct rectx *ctx = alloc_ctx(regex);
+    struct rectx *ctx = alloc_ctx(regex, flags);
     if (!ctx) return NULL;
     ctx->flags = flags;
     ctx->groups = 1;
@@ -546,22 +815,45 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
     char        *p = regex;
     struct node *last = NULL;
     int         lazy;
+    int         icase = flags & RELE_CASELESS;
 
-    // Early part of the tree.... ".*(main)", so a DOT STAR (lazy) and
-    // a GROUP 0...
-    //last = create_node_here(ctx, last, OP_MATCH, NULL, (struct node *)'.');
-    //last = create_node_above(ctx, last, OP_STAR, NULL, last);
-    //last->lazy = 1;
+    // For string finding...
+    int         slen;
+    char        ch;
+
+    // Early part of the tree....
     last = create_node_here(ctx, last, OP_GROUP, NULL, NULL);
     last->group = 0;
 
     while (*p) {
+        // Start out by seeing if we have a string here ....
+        p = find_string(p, ctx->strings, &slen, &ch, icase);
+        if (!p) goto fail;
+        if (slen > 1) {
+            last = create_node_here(ctx, last, OP_MATCHSTR, NULL, NULL);
+            last->string = ctx->strings;
+            last->len = slen;
+            ctx->strings += slen;
+            continue;
+        } else if (slen == 1) {
+            last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
+            if (!last) goto fail;
+            last->ch1 = icase ? fast_tolower(ch) : ch;
+            continue;
+        }
+
+        // Otherwise we can deal with everything else...
         switch (*p) {
             case '+':
                 last = create_node_above(ctx, last, OP_PLUS, NULL, last);
                 goto star_plus_question;
             case '*':
-                last = create_node_above(ctx, last, OP_STAR, NULL, last);
+                if (last && last->op == OP_MATCH && last->ch2 == '.') {
+                    last->op = OP_DOTSTAR;
+//                    last->match = NULL;
+                } else {
+                    last = create_node_above(ctx, last, OP_STAR, NULL, last);
+                }
                 goto star_plus_question;
             case '?':
                 last = create_node_above(ctx, last, OP_QUESTION, NULL, last);
@@ -611,110 +903,61 @@ star_plus_question:
                 last = create_node_above(ctx, last, OP_MULT, NULL, last);
                 p = minmax(p, last);
                 if (!p) goto fail;
-                if (p[1] == '?') { 
+                if (*p == '?') { 
                     last->lazy = 1; 
                     p++; 
                 }
-                break;
+                continue;           // p is already incremented
+
 
             case '^':
+                last = create_node_here(ctx, last, OP_ANCHOR, NULL, NULL);
+                last->ch1 = (flags & RELE_NEWLINE) ? '^' : 'A';
+                break;
+
             case '$':
                 last = create_node_here(ctx, last, OP_ANCHOR, NULL, NULL);
-                last->ch1 = *p;
-                break;
+                last->ch1 = (flags & RELE_NEWLINE) ? '$' : 'Z';
+               break;
 
             case '[':
                 last = create_node_here(ctx, last, OP_MATCHSET, NULL, NULL);
                 if (!last) goto fail;
                 p = build_set(ctx, p, last);
                 if (!p) goto fail;
-                break;
+                continue;                   // p will already be incremented
 
-            default:
-                // Handle the \Q..\E case....
-                if (p[0] == '\\' && p[1] == 'Q') {
-                    p++;    // on the Q
-                    while (p[1] && !(p[1] == '\\' && p[2] == 'E')) {
-                        p++;
-                        last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
-                        last->ch1 = *p;
-                        // TODO: upper/lower
-                    }
-                    if (!p[1]) goto fail;       // no end to \Q..\E
-                    p += 2;
-                    break;
-                }
 
-                // We are going to need a OP_MATCH or an OP_MATCHGRP
+            // With the new approach to strings, this can only be a few things
+            // anchors, CRLF, \d, \w etc, dot, and group references
+            case '.':
                 last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
                 if (!last) goto fail;
+                last->ch2 = (flags & RELE_NEWLINE) ? ',' : '.';
+                break;
 
-                if (*p == '\\') {
-                    if (is_group(p+1, &(last->mgrp), &p, NULL)) {
+            case '\\':
+                p++;
+                last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
+                if (is_group(p, &(last->mgrp), &p, NULL)) {
                         if (!p) goto fail;          // group syntax error
                         last->op = OP_MATCHGRP;
-                    } else {
-                        // Handle special cases and normal backslash chars...
-                        switch (p[1]) {
-                            case 'R':   last->op = OP_CRLF;
-                                        break;
-                            case 'b':   
-                            case 'B':
-                                        last->op = OP_ANCHOR;
-                                        last->ch1 = p[1];
-                                        break;
-                            case 'x':
-                                        // TODO: how does case independence work for this?
-                                        last->ch1 = tohex(p+2);
-                                        p += 2;
-                                        break;
-
-                            case 't':   last->ch1 = '\t'; break;
-                            case 'n':   last->ch1 = '\n'; break;
-
-                            // This will cater for the class matches \d \w etc.
-                            default:
-                                        last->ch2 = p[1];
-                                        if (!p[1]) goto fail;       // nothing after backslash
-                        }
-                        p++;
-                    }
-                } else {
-                    // The single char case...
-                    if (*p == '.') {
-                        // this is the only special one...
-                        last->ch2 = '.';
-                    } else {
-                        // TODO: CASELESS
-                        last->ch1 = *p;
-                    }
+                        continue;                   // p will be correct
                 }
-/*
-
-                if (*p == '\\' && is_group(p+1, &(last->mgrp), &p, NULL)) {
-                    if (!p) goto fail;              // group syntax error
-                    last->op = OP_MATCHGRP;
-                } else {
-                    last->ch[0] = *p;
-                    if (*p == '\\') {
-                        // Handle special cases and normal backslash chars...
-                        switch (p[1]) {
-                            case 'R':   last->op = OP_CRLF;
-                                        break;
-                            case 'b':   
-                            case 'B':
-                                        last->op = OP_ANCHOR;
-                                        last->ch[0] = p[1];
-                                        break;
-                            default:
-                                        last->ch[1] = p[1];
-                                        if (!p[1]) goto fail;
-                        }
-                        p++;
-                    }
+                switch (*p) {
+                    case 0:     goto fail;
+                    case 'R':   last->op = OP_CRLF; break;
+                    case 'A':
+                    case 'Z':
+                    case 'b':
+                    case 'B':   last->op = OP_ANCHOR; last->ch2 = *p; break;
+                    default:    last->ch2 = *p; break;  // \w \d etc.
                 }
-                    (*/
-                    
+                break;
+            
+            default:
+                fprintf(stderr, "Unknown char in compile (pass2) [%c]\n", *p);
+                goto fail;   
         }
         p++;
     }
@@ -724,9 +967,12 @@ star_plus_question:
     last = create_node_here(ctx, ctx->root, OP_DONE, NULL, NULL);
 
     // Run the optimisation check...
-    if (NOT_FLAG(flags, F_NO_FASTSTART)) {
+    if (NOT_FLAG(flags, RELE_NO_FASTSTART)) {
         ctx->fast_start = fast_start(ctx);
     }
+
+    optimiser(ctx);
+
     return ctx;
 
 fail:
@@ -739,8 +985,9 @@ fail:
 // Simple matching with escapes and classes
 // -------------------------------------------------------------------------------
 static int matchone(char s, char ch) {
-    if (s == '.')   return 1;           // TODO: newlines and stuff
-
+    if (s == '.') return 1;
+    if (s == ',') return (ch != '\n');      // multi-line version of dot
+    
     switch(s) {
         // Types...
         case 'd':       return isdigit(ch);
@@ -749,9 +996,12 @@ static int matchone(char s, char ch) {
         case 'W':       return !isalnum(ch);
         case 's':       return isspace(ch);
         case 'S':       return !isspace(ch);
+
+        // TODO: needs to fail in compile rather than here
+        default:
+                        fprintf(stderr, "unknown matchone s=[%c] ch=[%c]\n", s, ch);
+                        return -1;
     }
-    // TODO: needs to fail in compile rather than here
-    return -1;
 }
 
 // -------------------------------------------------------------------------------
@@ -836,8 +1086,6 @@ static inline int has_same_stack(struct rectx *ctx, struct task *a, struct task 
  * Task Deduplication ... if we are have matchedsomething, then look at
  * all the tasks that went before us and see if any did the same match and
  * then, if the state is all the same, we can die.
- * 
- * TODO: is the state actually important or not??
  */
 static inline int has_prior_match(struct rectx *ctx, struct task *run_list, struct node *n, struct task *t) {
     for (struct task *x = run_list; x != t; x = x->next) {
@@ -848,6 +1096,7 @@ static inline int has_prior_match(struct rectx *ctx, struct task *run_list, stru
     return 0;
 }
 
+
 static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, int flags);
 
 int rele_match(struct rectx *ctx, char *p, int len, int flags) {
@@ -855,21 +1104,53 @@ int rele_match(struct rectx *ctx, char *p, int len, int flags) {
     char *end = p + (len ? len : strlen(p));
     struct node *n = ctx->fast_start;
 
+        // Used for caseless matching
+    int icase = ctx->flags & RELE_CASELESS;
+
     // Now see if we have a faststart option...
     if (n) {
         if (n->op == OP_MATCH) {
-            while (p <= end) {
-                if ((n->ch1 && (n->ch1 == *p || n->ch2 == *p)) || (!n->ch1 && matchone(n->ch2, *p))) {
+            if (n->ch1) {
+                // Ok, normal char ... need to see if icase or not
+                if (icase) {
+                    for (; p <= end; p++) {
+                        char c1 = fast_tolower(*p);
+                        char c2 = fast_tolower(n->ch1);     // TODO: not sure we need to do this?
+                        if (c1 != c2) continue;
+                    }
+                    if (rele_match_iter(ctx, start, p, end, flags)) return 1;
+                } else {
+                    for (; p <= end; p++) {
+                        p = memchr(p, n->ch1, end - p);
+                        if (!p) return 0;
+                        if (rele_match_iter(ctx, start, p, end, flags)) return 1;
+                    }
+                }
+            } else {
+                // Special char match, performance nightmare...
+                for (; p <= end; p++) {
+                    if (!matchone(n->ch2, *p)) continue;
                     if (rele_match_iter(ctx, start, p, end, flags)) return 1;
                 }
-                p++;
+            }
+        } else if (n->op == OP_MATCHSTR) {
+            if (icase) {
+                for (; p <= end; p++) {
+                    p = rele_strifind(p, end - p, n->string, n->len);
+                    if (!p) return 0;
+                    if (rele_match_iter(ctx, start, p, end, flags)) return 1;
+                }                
+            } else {
+                for (; p <= end; p++) {
+                    p = memmem(p, end - p, n->string, n->len);
+                    if (!p) return 0;
+                    if (rele_match_iter(ctx, start, p, end, flags)) return 1;
+                }
             }
         } else if (n->op == OP_MATCHSET) {
-            while (p <= end) {
-                if (match_set(*p, n->set)) {
-                    if (rele_match_iter(ctx, start, p, end, flags)) return 1;
-                }
-                p++;
+            for (; p <= end; p++) {
+                if (!match_set(*p, n->set)) continue;
+                if (rele_match_iter(ctx, start, p, end, flags)) return 1;
             }
         } else if (n->op == OP_STAR) {
             if (rele_match_iter(ctx, start, p, end, flags)) return 1;
@@ -877,17 +1158,28 @@ int rele_match(struct rectx *ctx, char *p, int len, int flags) {
             fprintf(stderr, "WEIRD FAST START\n");
         }
     } else {
-        while (p <= end) {
+        for (; p <= end; p++) {
+            fprintf(stderr, "attempting match at %p\n", p);
             if (rele_match_iter(ctx, start, p, end, flags)) return 1;
-            p++;
+            fprintf(stderr, "failed\n");
         }
     }
 
-    if (NOT_FLAG(flags, F_KEEP_TASKS)) {
-        while (ctx->free_list) { struct task *x = ctx->free_list->next; free(ctx->free_list); ctx->free_list = x; }
+    fprintf(stderr, "DONE is %p\n", ctx->done);
+
+    if (NOT_FLAG(flags, RELE_KEEP_TASKS)) {
+        fprintf(stderr, "X\n");
+        while (ctx->free_list) { 
+            struct task *x = ctx->free_list->next; 
+            fprintf(stderr, "Freeing %p (next=%p)\n", ctx->free_list, x);
+            free(ctx->free_list); 
+            ctx->free_list = x; 
+        }
+        fprintf(stderr, "Y\n");
     }
     return 0;
 }
+
 
 /**
  * Regular expression matching, returns 1 if a match is found or
@@ -911,12 +1203,20 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
     uint32_t    iter = 0;
     struct task *expected;
 
+    // Used for caseless matching
+    int icase = ctx->flags & RELE_CASELESS;
+
     do {
         // Get ready to run through for this char...
         t = run_list;
         if (!t) goto done;
 
-        char ch = (p < end ? *p : 0);
+        char ch;
+        if (p < end) {
+            ch = (icase ? fast_tolower(*p) : *p);
+        } else {
+            ch = 0;
+        }
         prev = NULL;
 
         expected = t;
@@ -925,6 +1225,20 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
         // a match type op, then we either die (match failed), or we stay
         // for next time.
         while (t) {
+            // TODO: We could do a fast wait here for any tasks waiting for a
+            //       particular p value. It means moving p into it's own task
+            //       variable.
+            // HOw does that affect iter below? I think it would break it
+            // which means we'll be slower than we could be.
+            if (0) {
+                if (t->p) {
+                    if (t->p != p) { prev = t; t = t->next; continue; }
+                    t->p = NULL;
+                }
+            }
+
+
+
             // This is attempting to increase iter for every task but taking
             // into account child tasks and not incrememnting for them. It basically
             // looks at what's coming next, and then only increments iter when it
@@ -937,7 +1251,7 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
             struct node *n = t->n;
 
-            // Probablt the most likely...
+            // Probablt the most likely... although less so with OP_MATCHSTR support
             if (n->op == OP_CONCAT) {
                 if (t->last == n->a) goto leg_b;
                 if (t->last == n->b) goto parent;
@@ -949,39 +1263,36 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
             // Probably the second most likely...
             if (n->op == OP_MATCH) {
-                if (!ch) goto die;
-                if ((n->ch1 && (n->ch1 == ch || n->ch2 == ch)) || (!n->ch1 && matchone(n->ch2, ch))) {
+                if (!ch) goto die;      // can't match NULL
+                if ((n->ch1 && (n->ch1 == ch)) || (!n->ch1 && matchone(n->ch2, ch))) {
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
-                    t->last = n;
-                    t->n = n->parent;
-                    goto next;
+                    goto match_ok;
                 }
                 goto die;
             }
 
-            // PROBLEM....
-            //
-            // If we have a + or * or a {x,MAX} then we have unbounded task creation.
-            // If the match is zero length (a? or \b or ^ or something) then we have
-            // infinite task creation (or unbounded, more than we need!)
-            //
-            // At +
-            //.   we go down and if we, or any of our children, come back up with
-            //    no matches, then we need to take action.
-            //
-            //    the issue is that there are other tasks that could be down in
-            //.   the subtree, they could come up and match p or however we are
-            //.   tracking.
-            //
-            //.   is there a way of tracking parent tasks, by recording the next
-            //.   task on the list and incrementing iter when that task starts?
-            //.   that way any children wouldn't cause an iter increase and would
-            //.   still be caught by the iter check
-            //
-            //
-
-
-
+            if (n->op == OP_MATCHSTR) {
+                if (t->last == n->parent) {
+                    // Ok, we need to do the comparison, and then either die or setup
+                    // to hang around to the right end point.
+                    if (icase) {
+                        if (!rele_strncasecmp(n->string, p, n->len)) goto die;
+                    } else {
+                        if (memcmp(n->string, p, n->len) != 0) goto die;
+//                        fprintf(stderr, "Have string match [%.*s]\n", n->len, n->string);
+                    }
+                    if (has_prior_match(ctx, run_list, n, t)) goto die;
+                    // We need to stay here
+                    t->last = n;                // horrible overloading
+                    t->p = p + n->len - 1;
+                    goto next;
+                }
+                if (p == t->p) {
+                    t->n = n->parent;
+                    t->last = n;
+                }
+                goto next;
+            }
 
 
             // If we get here from above, then go down the b leg. If we get here
@@ -1006,7 +1317,6 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
 
             // If we hit from above then spawn to go right back up (zero) and from
             // b we do the same.
-            // TODO: zero length match support
             if (n->op == OP_STAR) {
                 if (t->last == n->parent) {
                     n->iter = iter;
@@ -1015,6 +1325,62 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                     n->iter = iter;
                 }
                 goto new_b_or_parent;
+            }
+
+            if (n->op == OP_DOTSTAR) {
+                // Let's handle the match case first...
+                // TODO: need to handle OP_MATCH and others... and icase etc.
+                if (n->match && n->match->op == OP_MATCHSTR) {
+                    if (t->last == n->parent) {
+                        // If we have a match, then we can try to match it.
+                        t->p = memmem(p, (size_t)(end - p), n->match->string, n->match->len);
+                        if (!t->p) goto die;        // we'll never match the next match
+                        // If we did match then we need to wait here for it...
+                        goto next;
+                    } else {
+                        // We are waiting...
+                        if (p == t->p) {
+                            if (n->lazy) {
+                                // We need to spawn a child to look for longer matches
+                                // (lower priority) and then we can go up and deal with
+                                // the one we've found.
+                                t->next = task_new(ctx, t, t->next, n->parent, n);
+                                goto parent;
+                            } else {
+                                // Spawn child to go up and deal with the match, but
+                                // we stay here because longer ones are more important.
+                                t->next = task_new(ctx, t, t->next, n, n->parent);
+                                t->last = n->parent;
+                                goto next;
+                            }
+                        }
+                        goto next;
+                    }
+                }
+                // Default case ... act as a normal .* and .*?
+                //
+                // Greedy ... spawn child to go to parent, we stay here just check for null.
+                // Lazy ... spawn child to stay here, we got to parent
+                //
+                // TODO: this must be able to be cleaning, hate the NULL t->last idea!
+                //
+                // Walk this through from an old .* mechanism and see what happends.
+
+                if (t->last == NULL) {
+                    // Special lazy case, we spawned to come here as a matcher...
+                    if (!ch) goto die;
+                    t->last = n;
+                    goto next;
+                }
+                if (n->lazy) {
+                    t->next = task_new(ctx, t, t->next, NULL, n);
+                    goto parent;
+                } else {
+                    t->next = task_new(ctx, t, t->next, n, n->parent);
+                    if (!ch) goto die;      // can't match NULL
+                    t->last = n;
+                    goto next;
+                }
             }
 
 from_GROUP:
@@ -1029,13 +1395,11 @@ from_GROUP:
                 }
                 if (t->last == n->b) {
                     // On the way back up... fill in the length
-                    // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
                     t->n = n->parent;
                     if (n->group != NO_GROUP) { t->grp[n->group].rm_eo = (int32_t)(p - start); }
                 } else {
                     // Going down leg b... mark the start
                     t->n = n->b;
-                    // TODO: do we want the first or last (i.e. only do it if it's currently -1?)
                     if (n->group != NO_GROUP) { t->grp[n->group].rm_so = (int32_t)(p - start); }
                 }
                 t->last = n;
@@ -1102,16 +1466,24 @@ from_GROUP:
                                         goto parent;
                                     }
                                     goto die;
+                    case 'A':       if (p == start) goto parent;
+                                    goto die;
+                    case 'Z':       if (p == end) goto parent;
+                                    goto die;
+
                     case '^':       if (p == start) goto parent; 
+                                    if (p[-1] == '\n') goto parent;
                                     goto die;
                     case '$':       if (p == end) goto parent;
+                                    if (*p == '\n') goto parent;
                                     goto die;
                     default:        goto die;       // shouldn't happen
 
                 }
             }
 
-
+            // TODO: ch is already lower() if icase, which is a waste
+            //       could we do it later/here?
             if (n->op == OP_MATCHSET) {
                 if (match_set(ch, n->set)) {
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
@@ -1122,41 +1494,46 @@ from_GROUP:
                 goto die;
             }
 
-            // Match a previous group, coming from the top we initialise then stay
-            // here iterating... originally we used a separate variable, but a stack
-            // item should be fine.
             if (n->op == OP_MATCHGRP) {
                 if (t->last == n->parent) {
+                    // Ok, we need to do the comparison, and then either die or setup
+                    // to hang around to the right end point.
+                    int len = t->grp[n->mgrp].rm_eo - t->grp[n->mgrp].rm_so;
+                    char *grpstr = start + t->grp[n->mgrp].rm_so;
+                    
                     // A zero length group match is a ghost match...
-                    if (t->grp[n->mgrp].rm_so == t->grp[n->mgrp].rm_eo) {
-                        goto parent;
+                    if (!len) goto parent;
+
+                    // One char match is simple
+                    if (len == 1) {
+                        if (icase) {
+                            if (fast_tolower(*grpstr) != fast_tolower(*p)) goto die;
+                        } else {
+                            if (*grpstr != *p) goto die;
+                        }
+                        if (has_prior_match(ctx, run_list, n, t)) goto die;
+                        goto match_ok;
                     }
-                    // We will use a stack entry for tracking position...
-                    if (t->sp == 0) {
-                        fprintf(stderr, "STACK OVERFLOW, MATCHGRP\n");
-                        goto die;
+                    // String match...
+                    if (icase) {
+                        if (!rele_strncasecmp(grpstr, p, len)) goto die;
+                    } else {
+                        if (memcmp(grpstr, p, len) != 0) goto die;
                     }
-                    t->sp--;
-                    t->stack[t->sp] = t->grp[n->mgrp].rm_so;
-                }
-                if (ch == start[t->stack[t->sp]]) {
                     if (has_prior_match(ctx, run_list, n, t)) goto die;
-                    t->last = n;
-                    t->stack[t->sp]++;
-                    if (t->stack[t->sp] == t->grp[n->mgrp].rm_eo) { 
-                        t->sp++; 
-                        t->n = n->parent; 
-                    }
+                    // We need to stay here
+                    t->last = n;                // horrible overloading
+                    t->p = p + len - 1;
                     goto next;
                 }
-                goto die;
+                if (p == t->p) goto match_ok;
+                goto next;
             }
+
 
             // If we come from above then get a new stack position and init, otherwise
             // count until we hit min, then spawn until max...
             //
-            // TODO: zero length match support -- any zero length match is considered
-            // to have met the requirement.
             // Need to ensure that a zero min doesn't get killed. Check from coming from b.
             if (n->op == OP_MULT) {
                 if (t->last == n->parent) {
@@ -1237,6 +1614,10 @@ parent:             t->n = n->parent;
                     t->last = n;
                     continue;
 
+match_ok:           t->n = n->parent;
+                    t->last = n;
+                    // fall through...
+
 next:               prev = t;
                     t = t->next;
                     continue;
@@ -1282,8 +1663,10 @@ char *opmap(uint8_t op) {
         case OP_MATCHSET:   return "MATCHSET";
         case OP_MULT:       return "MULT";
         case OP_MATCHGRP:   return "MATCHGRP";
+        case OP_MATCHSTR:   return "MATCHSTR";
         case OP_CRLF:       return "CRLF";
         case OP_ANCHOR:     return "ANCHOR";
+        case OP_DOTSTAR:    return "DOTSTAR";
         default:            return "UNKNOWN";
     }
 }
@@ -1322,8 +1705,22 @@ void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
             GEND;
             return;
 
+        case OP_MATCHSTR:
+            fprintf(f, "'%.*s'", n->len, n->string);
+            GEND;
+            return;
+
         case OP_ANCHOR:
             fprintf(f, "'%c'", n->ch1);
+            GEND;
+            return;
+
+        case OP_DOTSTAR:
+            if (n->match) {
+                fprintf(f, "[SRCH NODE %d]", NODE_ID(ctx, n->match));
+            } else {
+                fprintf(f, "none");
+            }
             GEND;
             return;
 
