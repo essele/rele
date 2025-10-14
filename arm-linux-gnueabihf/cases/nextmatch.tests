@@ -45,3 +45,32 @@ N:nm5
 T:sdfjkhsdfkjh
 0:0,12
 
+#
+# Checking dot plus (greedy)
+#
+N:dp1
+/.+abc\d
+T:blahabc4ffsdkjabc2sdabc3f
+0:0,24
+
+#
+# Checking dot plus (lazy)
+#
+N:dp2
+/.+?abc\d
+T:blahabc4ffsdkjabc2sdabc3f
+0:0,8
+
+N:dp3
+/.+a\d
+T:aaaazzzzaa1bcdef
+0:0,11
+
+N:dp4
+/.+a\d
+T:a4hello
+E:MATCHFAIL
+0:0,3
+
+
+

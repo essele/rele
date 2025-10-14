@@ -24,6 +24,7 @@ enum {
     OP_MATCHSTR,
 
     OP_PLUS,
+    OP_DOTPLUS,
     OP_STAR,
     OP_DOTSTAR,
     OP_QUESTION,
@@ -432,6 +433,7 @@ struct node *optimiser(struct rectx *ctx) {
             // TODO: If we have concurrent dotstar's can we somehow inherit
             // the match? Not sure if easy or possible? or sensible.
             // TODO: DOTPLUS ... basically a dotstar but can't be zero??
+            case OP_DOTPLUS:
             case OP_DOTSTAR:
                 if (!fstart) fstart = n;
                 dotstar = n;
@@ -692,10 +694,11 @@ struct rectx *alloc_ctx(char *regex, int flags) {
 
             // These are always a node...
             case '*':
-                if (p > regex && p[-1] == '.' && NOT_FLAG(flags, RELE_NEWLINE)) nodes--;     // DOTSTAR
+            case '+':
+                if (p > regex && p[-1] == '.' && NOT_FLAG(flags, RELE_NEWLINE)) nodes--;     // DOTSTAR/DOTPLUS
                 // Fall through...
 
-            case '+': case '?':
+            case '?':
                 if (p[1] == '?') p++;       // lazy version
                 nodes++;
                 break;
@@ -817,7 +820,11 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
         // Otherwise we can deal with everything else...
         switch (*p) {
             case '+':
-                last = create_node_above(ctx, last, OP_PLUS, NULL, last);
+                if (last && last->op == OP_MATCH && last->ch2 == '.') {
+                    last->op = OP_DOTPLUS;
+                } else {
+                    last = create_node_above(ctx, last, OP_PLUS, NULL, last);
+                }
                 goto star_plus_question;
             case '*':
                 if (last && last->op == OP_MATCH && last->ch2 == '.') {
@@ -1145,8 +1152,8 @@ int rele_match(struct rectx *ctx, char *p, int len, int flags) {
     int icase = ctx->flags & RELE_CASELESS;
 
     if (n) {
-        if (n->op == OP_DOTSTAR) {
-            // This is a special case, we only call rele_match_iter once as the .* will match everything
+        if (n->op == OP_DOTSTAR || n->op == OP_DOTPLUS) {
+            // This is a special case, we only call rele_match_iter once as the .* or .+ will match everything
             if (rele_match_iter(ctx, start, p, end, flags)) return 1;
         } else {
             for (; p <= end; p++) {
@@ -1306,6 +1313,49 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                 goto new_b_or_parent;
             }
 
+            if (n->op == OP_DOTPLUS) {
+                if (n->match) {
+                    // First time we do the first dot (because fo plus)...
+                    if (t->last == n->parent) {
+                        if (!ch) goto die;
+                        t->last = NULL;
+                        goto next;
+                    }
+                    // last=NULL is our main matcher...
+                    if (t->last == NULL) {
+                        t->p = next_match(n->match, start, p, end, icase, t);
+                        if (!t->p) goto die;
+                        if (t->p != p) { t->last = n; goto next; }      // wait
+                        t->p = NULL;    // drop through
+                    }
+                    // When we reach the match...
+                    if (n->lazy) {
+                        t->next = task_new(ctx, t, t->next, NULL, n);
+                        // TODO: could this get stuck? I do't think so because the match worked
+                        // what if it was a $ or somethign like that??
+                        t->next->p = p + 1;     // wait for one, quicker than using t->last= parent?
+                        goto parent; 
+                    } else {
+                        t->next = task_new(ctx, t, t->next, n, n->parent);
+                        t->last = NULL;
+                        goto next;
+                    }
+                }
+                // Normal operation without forward matching...
+                if (t->last != n->parent) {
+                    if (n->lazy) {
+                        t->next = task_new(ctx, t, t->next, n->parent, n);
+                        goto parent;
+                    } else {
+                        t->next = task_new(ctx, t, t->next, n, n->parent);
+                    }
+                }
+                if (!ch) goto die;
+                t->last = n;
+                goto next;
+            }
+
+            // TODO: look if we can use a wait rather than the NULL thing here...
             if (n->op == OP_DOTSTAR) {
                 // If t->last is NULL, then we are a lazy sub-task...
                 if (t->last == NULL) {
@@ -1319,18 +1369,17 @@ static int rele_match_iter(struct rectx *ctx, char *start, char *p, char *end, i
                     if (t->last == n->parent) {
                         t->p = next_match(n->match, start, p, end, icase, t);
                         if (!t->p) goto die;
-                        t->last = n;
-                        goto next;
+                        if (t->p != p) { t->last = n; goto next; }      // immediate match .. drop through
+                        t->p = NULL; // fall througg
+                    }
+                    // If we get here then we've got to the start of the match
+                    if (n->lazy) {
+                        t->next = task_new(ctx, t, t->next, NULL, n);
+                        goto parent;
                     } else {
-                        // If we get here then we've got to the start of the match
-                        if (n->lazy) {
-                            t->next = task_new(ctx, t, t->next, NULL, n);
-                            goto parent;
-                        } else {
-                            t->next = task_new(ctx, t, t->next, n, n->parent);
-                            t->last = n->parent;
-                            goto next;
-                        }
+                        t->next = task_new(ctx, t, t->next, n, n->parent);
+                        t->last = n->parent;
+                        goto next;
                     }
                 }
                 // Default case ... act as a normal .* and .*?
@@ -1627,6 +1676,7 @@ char *opmap(uint8_t op) {
         case OP_CRLF:       return "CRLF";
         case OP_ANCHOR:     return "ANCHOR";
         case OP_DOTSTAR:    return "DOTSTAR";
+        case OP_DOTPLUS:    return "DOTPLUS";
         default:            return "UNKNOWN";
     }
 }
@@ -1676,6 +1726,7 @@ void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
             return;
 
         case OP_DOTSTAR:
+        case OP_DOTPLUS:
             if (n->match) {
                 fprintf(f, "[SRCH NODE %d]", NODE_ID(ctx, n->match));
             } else {
