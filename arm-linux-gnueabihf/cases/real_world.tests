@@ -1,0 +1,157 @@
+N:digitsequence
+D:match a sequence of digits
+/\d+
+T:abc123xyz456
+0:3,6
+
+N:hexbyte
+D:match a two-digit hexadecimal byte
+/[0-9A-Fa-f]{2}
+T:FF00AB12
+0:0,2
+
+N:decimalnumber
+D:match decimal numbers, optional fraction
+/\d+(\.\d+)?
+T:temp=23.5C
+0:5,9
+1:7,9
+
+N:identifier
+D:match a C-style identifier
+/[a-zA-Z_]\w*
+T:int_var = 42
+0:0,7
+
+N:ipaddress
+D:simple IPv4 address
+/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
+T:ping 192.168.1.1
+0:5,16
+
+N:macaddress
+D:MAC address XX:XX:XX:XX:XX:XX
+/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}
+T:eth0=00:1A:2B:3C:4D:5E
+0:5,22
+1:17,20
+
+N:email
+D:simple email
+/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}
+T:send to test.user@example.com
+0:8,29
+
+N:url
+D:HTTP URL
+/http://[^\s]+
+T:visit http://example.com/page
+0:6,29
+
+N:time24h
+D:24-hour time HH:MM
+/\b([01]?\d|2[0-3]):[0-5]\d\b
+T:alarm at 07:30
+0:9,14
+1:9,11
+
+N:dateYYYYMMDD
+D:date in YYYY-MM-DD
+/\d{4}-\d{2}-\d{2}
+T:event 2025-10-16
+0:6,16
+
+N:csvfield
+D:comma separated value field
+/[^,]+
+T:foo,bar,baz
+0:0,3
+
+N:quotedstring
+D:double-quoted string
+/"[^"]*"
+T:msg="hello world"
+0:4,17
+
+N:commandlineflag
+D:dash flag like -o
+/-[a-zA-Z]
+T:program -v -o file
+0:8,10
+
+N:hexcolor
+D:CSS style hex color
+/#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})
+T:bg=#FF00CC
+0:3,10
+1:4,10
+
+N:uuid
+D:basic UUID v4
+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}
+T:id=123e4567-e89b-12d3-a456-426614174000
+0:3,39
+
+N:boolean
+D:simple boolean true/false
+/\b(true|false)\b
+T:flag=true
+0:5,9
+1:5,9
+
+N:filename
+D:simple filename
+/([a-zA-Z0-9_\-]+)\.(txt|cfg|log)
+T:open config.cfg
+0:5,15
+1:5,11
+2:12,15
+
+N:jsonkey
+D:JSON key in quotes
+/"[a-zA-Z0-9_]+":
+T:{"id":123}
+0:1,6
+
+N:jsonnumber
+D:JSON number
+/\b\d+\b
+T:{"id":123,"val":45}
+0:6,9
+
+N:hexprefix
+D:0x hexadecimal prefix
+/0x[0-9A-Fa-f]+
+T:mem=0x1A2B
+0:4,10
+
+N:commandarg
+D:simple command argument pattern
+/[^\s]+
+T:run test.exe -o out.txt
+0:0,3
+
+N:whitespace
+D:match spaces or tabs
+/[ \t]+
+T:field1  field2	field3
+0:6,8
+
+N:xmltag
+D:simple XML tag
+/<[a-zA-Z][a-zA-Z0-9]*>
+T:<tagname>content</tagname>
+0:0,9
+
+N:xmlclosetag
+D:simple XML close tag
+/</[a-zA-Z][a-zA-Z0-9]*>
+T:<tagname>content</tagname>
+0:16,26
+
+N:version
+D:semantic versioning
+/\d+\.\d+\.\d+
+T:app v1.2.3
+0:5,10
+

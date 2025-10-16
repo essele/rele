@@ -13,7 +13,8 @@ enum {
 
 enum {
     E_OK = 0,
-    E_MATCHFAIL,
+    E_MATCHFAIL = (1 << 0),
+    E_COMPFAIL = (1 << 1),
 };
 
 /*

@@ -35,9 +35,19 @@ static int re2_compile(char *pattern_c, int flags) {
     std::string pattern(pattern_c);
     RE2::Options options;
 
-    options.set_posix_syntax(true);
+    options.set_posix_syntax(false);   // Perl-style
+    options.set_longest_match(false);  // Don’t use POSIX-style longest
+    options.set_log_errors(false);
+    options.set_perl_classes(true);    // Enable \d, \w, etc.
+    options.set_case_sensitive(true);
+
     if (flags & F_ICASE) { options.set_case_sensitive(false); }
-    if (flags & F_NEWLINE) { options.set_one_line(false); }
+    if (flags & F_NEWLINE) { 
+        options.set_posix_syntax(true);   // stops \d etc, so not ideal!
+        options.set_one_line(false); 
+        options.set_dot_nl(false);         // Explicitly disable "dot matches newline"
+        options.set_never_nl(false);       // Allow newline matches
+    }
 
     re2_regex = new RE2(pattern, options);
     if (!re2_regex->ok()) {

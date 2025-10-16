@@ -52,7 +52,6 @@ static inline void memstats_get(struct memstats *m) {
     m->total_stack = stack_usage();
 }
 
-
 static inline void memstats_init(void) {
     __stack_low = get_sp() - ASSUMED_STACK_SIZE;
 }

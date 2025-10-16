@@ -48,7 +48,7 @@ int libpcre_free() {
 }
 
 struct engine pcre_engine = {
-    .name = "PCRE2",
+    .name = "pcre2",
     .compile = libpcre_compile,
     .match = libpcre_match,
     .res_count = libpcre_res_count,

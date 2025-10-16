@@ -65,74 +65,146 @@ uint64_t timespec_to_ns(struct timespec t) {
     return t.tv_sec * 1000000000 + t.tv_nsec;
 }
 
+
+/**
+ * Results for a given test...
+ */
+struct results {
+    int         compile_stack;          // stack usage
+    int         compile_allocs;         // how many allocs
+    int         compile_allocated;      // how much allocated
+    uint64_t    compile_time;           // ns to compile
+    int         compile_rc;             // return value from compile
+    int         compile_pass;           // did we compile as expected?
+
+    int         match_stack;            // stack usage
+    int         match_allocs;           // how many allocs
+    int         match_allocated;        // how much allocated
+    uint64_t    match_time;             // ns to match
+    int         match_rc;               // return value from match
+    int         match_resok;            // results match expectation
+    int         match_pass;             // did we match as expected? (inc groups)
+
+
+};
+
+
+
 /**
  * Routines that time the execution of compiling and matching
  */
 #define MAX_ALLOWED_NS (1000UL * 1000 * 1000 * 5)
 #define MAX_ITERATIONS (200000)
 
-uint32_t time_compile(struct engine *eng, char *regex, int flags) {
+int time_compile(struct engine *eng, const struct testcase *test, struct results *res) {
     struct timespec start, end;
     uint64_t sum = 0;
     int32_t i = 0;
 
     // Just to warm the cache up ...
     for (i = 0; i < 2; i++) {
-        eng->compile(regex, flags);
+        eng->compile(test->regex, test->cflags);
         eng->free();
     }
 
     i = 0;
     while (sum < MAX_ALLOWED_NS && i < MAX_ITERATIONS) {
         clock_gettime(CLOCK_MONOTONIC, &start);
-        eng->compile(regex, flags);
+        eng->compile(test->regex, test->cflags);
         clock_gettime(CLOCK_MONOTONIC, &end);
         eng->free();
         sum += timespec_to_ns(diff_timespec(start, end));
         i++;
     }
-    return (uint32_t)(sum/i);
+    res->compile_time = (sum/i);
+    return 1;
 }
 
-uint32_t time_match(struct engine *eng, char *regex, int cflags, char *text, int mflags) {
+int time_match(struct engine *eng, const struct testcase *test, struct results *res) {
     struct timespec start, end;
     uint64_t sum = 0;
     int32_t i = 0;
 
-    if (!eng->compile(regex, cflags)) {
+    if (!eng->compile(test->regex, test->cflags)) {
         fprintf(stderr, "Compile failed\n");
+        return 0;
     }
     while (sum < MAX_ALLOWED_NS && i < MAX_ITERATIONS) {
         clock_gettime(CLOCK_MONOTONIC, &start);
-        eng->match(text, mflags);
+        eng->match(test->text, test->mflags);
         clock_gettime(CLOCK_MONOTONIC, &end);
         sum += timespec_to_ns(diff_timespec(start, end));
         i++;
     }
     eng->free();
-    return (uint32_t)(sum/i);
+    res->match_time = (sum/i);
+    return 1;
 }
 
-int test_compile(struct engine *eng, char *regex, int flags, struct memstats *mem) {
+int test_compile(struct engine *eng, const struct testcase *test, struct results *res) {
     int rc;
-
+    struct memstats mem;
+    
     memstats_zero();
-    rc = eng->compile(regex, flags);
-    memstats_get(mem);
+    rc = eng->compile(test->regex, test->cflags);
+    memstats_get(&mem);
     eng->free();
+
+    res->compile_stack = mem.total_stack;
+    res->compile_allocs = mem.total_allocs;
+    res->compile_allocated = mem.total_allocated;
+    res->compile_rc = rc;
+
+    if (test->error & E_COMPFAIL) {
+        res->compile_pass = (rc == 1 ? 0 : 1);
+    } else {
+        res->compile_pass = (rc == 1 ? 1 : 0);
+    }
     return rc;
 }
 
-int test_match(struct engine *eng, char *regex, int cflags, char *text, int mflags, struct memstats *mem) {
+int test_match(struct engine *eng, const struct testcase *test, struct results *res, int verbose) {
     int rc;
+    struct memstats mem;
+    int results_ok = 0;
 
     memstats_zero();
-    rc = eng->compile(regex, cflags);
+    rc = eng->compile(test->regex, test->cflags);
     // TODO: rc checking
-    rc = eng->match(text, mflags);
-    memstats_get(mem);
+    rc = eng->match(test->text, test->mflags);
+    memstats_get(&mem);
+
+    if (rc == 1) {
+        int res_groups = eng->res_count();
+        int max = (test->groups > res_groups ? test->groups : res_groups);
+        results_ok = 1;
+        for (int i=0; i < max; i++) {
+            int tso = (i < test->groups ? test->res[i].so : -1);
+            int teo = (i < test->groups ? test->res[i].eo : -1);
+            int eso = (i < res_groups ? eng->res_so(i) : -1);
+            int eeo = (i < res_groups ? eng->res_eo(i) : -1);
+            char *status = ((tso == eso) && (teo == eeo)) ? "OK" : "FAIL";
+            if (verbose) {
+                fprintf(stderr, "\tExpected: %d: (%d, %d) got (%d, %d) -- %s\n", i, tso, teo, eso, eeo, status);
+            }
+            if ((tso != eso) || (teo != eeo)) results_ok = 0;
+        }
+    }
     eng->free();
-    return rc;
+
+    res->match_stack = mem.total_stack;
+    res->match_allocs = mem.total_allocs;
+    res->match_allocated = mem.total_allocated;
+    res->match_rc = rc;
+    res->match_resok = results_ok;
+
+    if (test->error & E_MATCHFAIL) {
+        res->match_pass = (rc == 1 ? 0 : 1);
+    } else {
+        res->match_pass = (rc == 1 ? 1 : 0);
+        if (!results_ok) res->match_pass = 0;
+    }
+    return res->match_pass;
 }
 
 /**
@@ -164,7 +236,11 @@ int is_in(char *item, char *list) {
 int main(int argc, char *argv[]) {
     memstats_init();
 
-    printf("Hello!\n");
+    enum {
+        MODE_REGRESSION,
+        MODE_CSV,
+        MODE_NORMAL,
+    };
 
     // Preparation for config
     char    *cf_groups = "all";
@@ -173,6 +249,8 @@ int main(int argc, char *argv[]) {
     int     cf_show_matches = 0;
     int     cf_build_tree = 0;
     int     cf_one = 0;
+//    int     cf_regression = 0;
+    int     cf_mode = MODE_NORMAL;
 
     // Some rudimentary argument processing
     int args = argc;
@@ -193,9 +271,20 @@ int main(int argc, char *argv[]) {
             cf_build_tree = 1;
         } else if (strcmp(arg, "-1") == 0) {
             cf_one = 1;
+        } else if (strcmp(arg, "-R") == 0) {
+            cf_mode = MODE_REGRESSION;
+        } else if (strcmp(arg, "-c") == 0) {
+            cf_mode = MODE_CSV;
         }
         ap++;
         args--;
+    }
+
+    if (cf_mode == MODE_CSV) {
+            printf("engine,group,name,");
+            printf("compile_pass,compile_rc,compile_stack,compile_allocs,compile_allocated,compile_time,");
+            printf("match_pass,match_rc,match_results,match_stack,match_allocs,match_allocated,match_time");
+            printf("\n");
     }
 
     const struct testcase **tcp = cases;
@@ -205,66 +294,69 @@ int main(int argc, char *argv[]) {
         if (!is_in(test->group, cf_groups)) continue;
         if (!is_in(test->name, cf_tests)) continue;
 
-        fprintf(stderr, "Test: %s/%s\n", test->group, test->name);
-        fprintf(stderr, "Regex: %s\n", test->regex);
-        if (strlen(test->text) > 100) {
-            fprintf(stderr, "Text: (long, %d chars)\n", (int)strlen(test->text));
-        } else {
-            fprintf(stderr, "Text: %s\n", test->text);
-        }
+        if (cf_mode == MODE_NORMAL) {
+            fprintf(stderr, "Test: %s/%s\n", test->group, test->name);
+            fprintf(stderr, "Regex: %s\n", test->regex);
+            if (strlen(test->text) > 100) {
+                fprintf(stderr, "Text: (long, %d chars)\n", (int)strlen(test->text));
+            } else {
+                fprintf(stderr, "Text: %s\n", test->text);
+            }
+        };
 
         struct engine **ep = engines;
         while (*ep) {
             struct engine *eng = *ep++;
-            struct memstats mem;
-            int compile_rc, match_rc;
-            uint32_t compile_time, match_time;
+            struct results res;
 
             if (!is_in(eng->name, cf_engines)) continue;
 
-            fprintf(stderr, "Engine: %s\n", eng->name);
-
-            compile_rc = test_compile(eng, test->regex, test->cflags, &mem);
-            fprintf(stderr, "Engine: %s compile=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
-                                        compile_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
-
-            if (compile_rc == 1) {
-                match_rc = test_match(eng, test->regex, test->cflags, test->text, 0, &mem);
-                fprintf(stderr, "Engine: %s match=(rc=%d, allocs=%d, allocated=%d, stack=%d)\n", eng->name, 
-                                            match_rc, mem.total_allocs, mem.total_allocated, mem.total_stack);
-
-
-                if (match_rc && cf_show_matches) {
-                    // We need to run another compile/match as we will have been freed by the above...
-                    eng->compile(test->regex, test->cflags);
-                    eng->match(test->text, test->mflags);
-
-                    int res_groups = eng->res_count();
-                    int max = (test->groups > res_groups ? test->groups : res_groups);
-                    for (int i=0; i < max; i++) {
-                        int tso = (i < test->groups ? test->res[i].so : -1);
-                        int teo = (i < test->groups ? test->res[i].eo : -1);
-                        int eso = (i < res_groups ? eng->res_so(i) : -1);
-                        int eeo = (i < res_groups ? eng->res_eo(i) : -1);
-                        char *status = ((tso == eso) && (teo == eeo)) ? "OK" : "FAIL";
-                        fprintf(stderr, "\tExpected: %d: (%d, %d) got (%d, %d) -- %s\n", i, tso, teo, eso, eeo, status);
-                    }
-
-                    eng->free();
-                }
+            if (cf_mode == MODE_NORMAL) {
+                fprintf(stderr, "Engine: %s\n", eng->name);
             }
+            // Make sure we start with all zero results...
+            memset(&res, 0, sizeof(struct results));
+
+            if (!test_compile(eng, test, &res)) goto results;
+            if (!test_match(eng, test, &res, cf_show_matches)) goto results;
 
             if (!cf_one) {
-                if (compile_rc ==1) {
-                    compile_time = time_compile(eng, test->regex, test->cflags);
-                    match_time = time_match(eng, test->regex, test->cflags, test->text, 0);
-                    fprintf(stderr, "Engine: %s (compile=%u match=%u)\n", eng->name, compile_time, match_time);
+                time_compile(eng, test, &res);
+                time_match(eng, test, &res);
+            }
+
+
+results:
+            if (cf_mode == MODE_REGRESSION) {
+                fprintf(stderr, "%s/%s - %s\n", test->group, test->name, res.match_pass ? "PASS" : "FAIL");
+            } else if (cf_mode == MODE_CSV) {
+                printf("%s,%s,%s,%s,%d,%d,%d,%d,%llu,%s,%d,%s,%d,%d,%d,%llu\n",
+                        eng->name,
+                        test->group, test->name,
+                        res.compile_pass ? "PASS" : "FAIL",
+                        res.compile_rc, res.compile_stack, res.compile_allocs, res.compile_allocated, res.compile_time,
+                        res.match_pass ? "PASS" : "FAIL",
+                        res.match_rc, res.match_resok ? "OK" : "FAIL",
+                        res.match_stack, res.match_allocs, res.match_allocated, res.match_time);
+
+            } else {
+                fprintf(stderr, "Compile status: %s (rc=%d)\n", res.compile_pass ? "PASS" : "FAIL", res.compile_rc);
+                fprintf(stderr, "Compile memory: stack [%d], allocs [%d], allocated [%d]\n", 
+                                                res.compile_stack, res.compile_allocs, res.compile_allocated);
+                if (!cf_one) {
+                    fprintf(stderr, "Compile time:   %llu\n", res.compile_time);
+                }
+                if (res.compile_rc == 1) {
+                    fprintf(stderr, "Match status:   %s (rc=%d) (res=%s)\n", res.match_pass ? "PASS" : "FAIL", res.match_rc,
+                                                                                                    res.match_resok ? "OK" : "FAIL");
+                    fprintf(stderr, "Match memory:   stack [%d], allocs [%d], allocated [%d]\n", 
+                                                    res.match_stack, res.match_allocs, res.match_allocated);
+                    if (!cf_one) {
+                        fprintf(stderr, "Match time:     %llu\n", res.match_time);
+                    }
                 }
             }
         }
     }
-
-    printf("here\n");
-
-    return 0;
+    exit(0);
 }

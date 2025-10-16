@@ -242,15 +242,18 @@ static char *build_set(struct rectx *ctx, char *p, struct node *n) {
         } else {
             if (*p == '\\') {
                 switch (*(++p)) {
-                    case 'w':   SET_RANGE('a', 'z');
+                    case 'w':   SET_VAL('_');
+                                SET_RANGE('a', 'z');
                                 SET_RANGE('A', 'Z');    // fall through
                     case 'd':   SET_RANGE('0', '9'); break;
                     case 's':   SET_VAL(' '); SET_VAL('\f'); SET_VAL('\n'); 
                                 SET_VAL('\r'); SET_VAL('\t'); SET_VAL('\v'); break;
                     case 'W':   SET_RANGE(0, '0'-1); SET_RANGE('9'+1, 'A'-1);
-                                SET_RANGE('Z'+1, 'a'-1); SET_RANGE('z'+1, 126); break;
+                                SET_RANGE('Z'+1, '_'-1); SET_VAL(0x60);
+                                SET_RANGE('z'+1, 126); break;
                     case 'D':   SET_RANGE(0, '0'-1); SET_RANGE('9'+1, 126); break;
                     case 'S':   SET_RANGE(0, 8); SET_RANGE(14, 31); SET_RANGE(33, 126); break;
+                    case 't':   SET_VAL('\t'); break;
                     case 0:     goto fail;
                     default:    SET_VAL(*p); break;
                 }
@@ -818,6 +821,9 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
         }
 
         // Otherwise we can deal with everything else...
+
+        // TODO TODO -- (?blah) crashes because of the misplaced ? need to do
+        // some sanity checking in here. Or before!
         switch (*p) {
             case '+':
                 if (last && last->op == OP_MATCH && last->ch2 == '.') {
@@ -968,8 +974,8 @@ static int matchone(char s, char ch) {
         // Types...
         case 'd':       return isdigit(ch);
         case 'D':       return !isdigit(ch);
-        case 'w':       return isalnum(ch);
-        case 'W':       return !isalnum(ch);
+        case 'w':       return (isalnum(ch) || ch == '_');
+        case 'W':       return !(isalnum(ch) || ch == '_');
         case 's':       return isspace(ch);
         case 'S':       return !isspace(ch);
 

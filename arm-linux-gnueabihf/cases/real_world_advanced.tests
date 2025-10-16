@@ -1,0 +1,113 @@
+N:optionalprotocol
+D:URL with optional http/https
+/https?://[^\s]+
+T:go to https://example.com or http://test.org
+0:6,25
+
+N:noncapturinggroup
+D:use non-capturing group for .jpg/.png
+/^(?:[a-zA-Z0-9_-]+)\.(jpg|png)$
+T:photo.png
+0:0,9
+1:6,9
+
+N:alternationwords
+D:alternation example for on/off/auto
+/\b(on|off|auto)\b
+T:mode is auto
+0:8,12
+1:8,12
+
+N:optionalgroup
+D:match color names optionally followed by digits
+/\b(color\d?)\b
+T:select color3 now
+0:7,13
+1:7,13
+
+N:greedyvslazy
+D:greedy vs lazy example
+/".*"
+T:say "hello" and "goodbye"
+0:4,25
+
+N:greedyvslazy2
+D:lazy version of quoted string
+/".*?"
+T:say "hello" and "goodbye"
+0:4,11
+
+N:repeatedlazy
+D:lazy quantifier inside tag
+/<.*?>
+T:<b>bold</b><i>italic</i>
+0:0,3
+
+N:anchoredline
+D:match a line starting with #
+/^#.*
+T:#define MAX 10
+0:0,14
+
+N:endanchor
+D:match word at end of line
+/\w+$
+T:line ends with END
+0:15,18
+
+N:wordboundary
+D:word boundary test
+/\bthe\b
+T:other theme the theater
+0:12,15
+
+N:escapedliteral
+D:literal dot vs any char
+/file\.txt
+T:file.txt and fileXtxt
+0:0,8
+
+N:optionalspace
+D:optional whitespace around equals
+/\s*=\s*
+T:x = 42
+0:1,4
+
+N:repeatedgroup
+D:comma-separated digits
+/^(\d+,)*\d+$
+T:1,2,3,4,5
+0:0,9
+1:6,8
+
+N:nestedgroups
+D:multiple nested captures
+/((ab)c)(d+)
+T:xxabcdde
+0:2,7
+1:2,5
+2:2,4
+3:5,7
+
+N:backreference
+D:match repeated words
+/\b(\w+)\s+\1\b
+T:yes yes we can
+0:0,7
+1:0,3
+
+N:multilineanchor
+D:match start of each line (multiline mode)
+/^abc/m
+T:def\nabc\nghi
+0:4,7
+
+#
+# TODO: this crashes!
+#
+N:dotallmode
+D:dotall should span newlines
+/(?s)a.*b
+T:a123\n456b
+0:0,9
+
