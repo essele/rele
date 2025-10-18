@@ -12,6 +12,22 @@
 // Match flags...
 #define RELE_KEEP_TASKS        (1 << 16)
 
+// Error codes for compile...
+enum {
+    RELE_CE_OK = 0,
+    RELE_CE_NOMEM = -1,
+    RELE_CE_MINMAX = -2,
+    RELE_CE_SYNTAX = -3,
+    RELE_CE_SETERR = -4,
+    RELE_CE_BADGRP = -5,
+    RELE_CE_INTERR = -6,        // internal error
+};
+
+// Error codes for match...
+enum {
+    RELE_ME_OK = 0,
+};
+
 // A define for this, but it will be anonymous
 struct rectx;
 
@@ -21,7 +37,7 @@ struct rele_match_t {
     int32_t     rm_eo;
 };
 
-struct rectx *rele_compile(char *regex, uint32_t flags);
+struct rectx *rele_compile(char *regex, uint32_t flags, int *error);
 int rele_match(struct rectx *ctx, char *p, int len, int flags);
 void rele_free(struct rectx *ctx);
 

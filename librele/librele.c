@@ -109,6 +109,7 @@ struct rectx {
 
 #define NODE_ID(ctx, n)          (int)(((void *)n - ((void *)ctx + sizeof(struct rectx)))/sizeof(struct node))
 
+#define SET_ERR(v)               if (error) *error = v;
 
 static struct node *create_node_above(struct rectx *ctx, struct node *this, uint8_t op, struct node *a, struct node *b) {
     struct node *parent = this->parent;
@@ -499,7 +500,6 @@ struct node *optimiser(struct rectx *ctx) {
                 goto done;
 
             default:
-                fprintf(stderr, "INVALID OP: %d\n", n->op);
                 return NULL;
     
 
@@ -626,8 +626,11 @@ char *find_string(char *p, char *str, int *len, char *ch, int icase) {
 				case 'x':		c = tohex(p+2); p += 2; break;		// TODO handle hex errors
 				case 'n':		c = '\n'; break;
 				case 't':		c = '\t'; break;
-				case '.':		c = '.'; break;
-				default:	fprintf(stderr, "unknown backslash [%c]\n", p[1]); goto error;
+
+                case '.': case '+': case '-': case '*': case '?':
+                                c = p[1]; break;
+				default:	//fprintf(stderr, "unknown backslash [%c]\n", p[1]); 
+                            goto error;
 			}
 			p += 2;
 		} else {
@@ -662,7 +665,7 @@ error:
 // to measure how many nodes and sets this regex will need and then allocate
 // the memory used for both in a single block.
 // ------------------------------------------------------------------------
-struct rectx *alloc_ctx(char *regex, int flags) {
+struct rectx *alloc_ctx(char *regex, int flags, int *error) {
     int matches = 0;
     int nodes = 0;
     int sets = 0;
@@ -690,7 +693,7 @@ struct rectx *alloc_ctx(char *regex, int flags) {
         switch (*p) {
             case '{':
                 p = minmax(p, NULL);
-                if (!p) return NULL;        // min max error
+                if (!p) { SET_ERR(RELE_CE_MINMAX); return NULL; }        // min max error
                 if (*p == '?') p++;         // lazy version
                 nodes++;
                 continue;                   // p is already incrememented
@@ -708,7 +711,12 @@ struct rectx *alloc_ctx(char *regex, int flags) {
 
             // An empty group counts as a node and a match...
             case '(':
-                if (p[1] == ')' || (p[1] == '?' && p[2] == ':' && p[3] == ')')) { matches++; }
+                if (p[1] == '?' && p[2] == ':') {
+                    // Non capturing...
+                    p += 2;
+                }
+                if (p[1] == '+' || p[1] == '*' || p[1] == '?') { SET_ERR(RELE_CE_SYNTAX); return NULL; }
+                if (p[1] == ')') { matches++; }
                 nodes++;
                 break; 
 
@@ -718,7 +726,7 @@ struct rectx *alloc_ctx(char *regex, int flags) {
 
             case '[':
                 p = dummy_set(p);
-                if (!p) return NULL;        // set error (not impl)
+                if (!p) { SET_ERR(RELE_CE_SETERR); return NULL; }
                 sets++;
                 matches++;
                 continue;                   // p will already be incremented
@@ -737,15 +745,15 @@ struct rectx *alloc_ctx(char *regex, int flags) {
             case '\\':
                 p++;
                 matches++;
-                if (!*p) return NULL;
+                if (!*p) { SET_ERR(RELE_CE_SYNTAX); return NULL; }
                 if (is_group(p, NULL, &p, NULL)) {
-                    if (!p) return NULL;        // group syntax error
+                    if (!p) { SET_ERR(RELE_CE_BADGRP); return NULL; }
                     continue;                   // p will be correct
                 }
                 break;
                 
             default:
-                fprintf(stderr, "Unknown char in compile (pass1) [%c]\n", *p);
+                SET_ERR(RELE_CE_SYNTAX);
                 return NULL;
         }
         p++;
@@ -765,7 +773,7 @@ struct rectx *alloc_ctx(char *regex, int flags) {
     struct rectx *ctx = malloc(sizeof(struct rectx) +
                                 (nodes * sizeof(struct node)) + 
                                 (sets * sizeof(struct set)) + strings);
-    if (!ctx) return NULL;
+    if (!ctx) { SET_ERR(RELE_CE_NOMEM); return NULL; }
 
     memset(ctx, 0, sizeof(struct rectx) +
                                 (nodes * sizeof(struct node)) + 
@@ -781,10 +789,10 @@ struct rectx *alloc_ctx(char *regex, int flags) {
 // Simple compiler that turns a regular expression into a binary tree
 // ------------------------------------------------------------------------
 
-struct rectx *rele_compile(char *regex, uint32_t flags) {
+struct rectx *rele_compile(char *regex, uint32_t flags, int *error) {
     // First allocate the ctx structure including nodes and sets based on
     // the regex
-    struct rectx *ctx = alloc_ctx(regex, flags);
+    struct rectx *ctx = alloc_ctx(regex, flags, error);
     if (!ctx) return NULL;
     ctx->flags = flags;
     ctx->groups = 1;
@@ -815,7 +823,6 @@ struct rectx *rele_compile(char *regex, uint32_t flags) {
             continue;
         } else if (slen == 1) {
             last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
-            if (!last) goto fail;
             last->ch1 = icase ? fast_tolower(ch) : ch;
             continue;
         }
@@ -886,7 +893,7 @@ star_plus_question:
             case '{':
                 last = create_node_above(ctx, last, OP_MULT, NULL, last);
                 p = minmax(p, last);
-                if (!p) goto fail;
+                if (!p) { SET_ERR(RELE_CE_MINMAX); goto fail; }
                 if (*p == '?') { 
                     last->lazy = 1; 
                     p++; 
@@ -906,7 +913,6 @@ star_plus_question:
 
             case '[':
                 last = create_node_here(ctx, last, OP_MATCHSET, NULL, NULL);
-                if (!last) goto fail;
                 p = build_set(ctx, p, last);
                 if (!p) goto fail;
                 continue;                   // p will already be incremented
@@ -916,7 +922,6 @@ star_plus_question:
             // anchors, CRLF, \d, \w etc, dot, and group references
             case '.':
                 last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
-                if (!last) goto fail;
                 last->ch2 = (flags & RELE_NEWLINE) ? ',' : '.';
                 break;
 
@@ -924,12 +929,12 @@ star_plus_question:
                 p++;
                 last = create_node_here(ctx, last, OP_MATCH, NULL, NULL);
                 if (is_group(p, &(last->mgrp), &p, NULL)) {
-                        if (!p) goto fail;          // group syntax error
+                        if (!p) { SET_ERR(RELE_CE_BADGRP); goto fail; }
                         last->op = OP_MATCHGRP;
                         continue;                   // p will be correct
                 }
                 switch (*p) {
-                    case 0:     goto fail;
+                    case 0:     SET_ERR(RELE_CE_SYNTAX); goto fail;
                     case 'R':   last->op = OP_CRLF; break;
                     case 'A':
                     case 'Z':
@@ -940,7 +945,7 @@ star_plus_question:
                 break;
             
             default:
-                fprintf(stderr, "Unknown char in compile (pass2) [%c]\n", *p);
+                SET_ERR(RELE_CE_SYNTAX);
                 goto fail;   
         }
         p++;
@@ -981,7 +986,7 @@ static int matchone(char s, char ch) {
 
         // TODO: needs to fail in compile rather than here
         default:
-                        fprintf(stderr, "unknown matchone s=[%c] ch=[%c]\n", s, ch);
+                        //fprintf(stderr, "unknown matchone s=[%c] ch=[%c]\n", s, ch);
                         return -1;
     }
 }
@@ -1126,7 +1131,7 @@ char *next_match(struct node *n, char *start, char *p, char *end, int icase, str
                             p = memchr(p, '\n', (size_t)(end - p));
                             if (!p) return end;
                             return p;
-                default:    fprintf(stderr, "INVALID FIRST MATCH ANCHOR [%c]\n", n->ch1);
+                default:    //fprintf(stderr, "INVALID FIRST MATCH ANCHOR [%c]\n", n->ch1);
                             return p;
             }
             // We only cater for specific types here...
@@ -1554,7 +1559,7 @@ from_GROUP:
                 if (t->last == n->parent) {
                     if (t->sp == 0) {
                         // TODO: stack error
-                        fprintf(stderr, "stack nesting too deep.\n");
+                        //fprintf(stderr, "stack nesting too deep.\n");
                         goto die;
                     }
                     t->sp--;
@@ -1660,12 +1665,9 @@ done:
     return 0;
 }
 
-
-
-
 #include <stdio.h>
 
-char *opmap(uint8_t op) {
+static char *opmap(uint8_t op) {
     switch(op) {
         case OP_MATCH:      return "MATCH";
         case OP_CONCAT:     return "CONCAT";
@@ -1687,7 +1689,7 @@ char *opmap(uint8_t op) {
     }
 }
 
-void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
+static void dump_dot(struct rectx *ctx, struct node *n, FILE *f) {
     if (!n) return;
 
     int chars;
@@ -1810,4 +1812,3 @@ void rele_export_tree(struct rectx *ctx, const char *filename) {
     fprintf(f, "}\n");
     fclose(f);
 }
-

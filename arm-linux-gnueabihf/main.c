@@ -144,11 +144,13 @@ int time_match(struct engine *eng, const struct testcase *test, struct results *
 int test_compile(struct engine *eng, const struct testcase *test, struct results *res) {
     int rc;
     struct memstats mem;
-    
+
     memstats_zero();
     rc = eng->compile(test->regex, test->cflags);
     memstats_get(&mem);
     eng->free();
+
+    rc = rc ? 1 : 0;
 
     res->compile_stack = mem.total_stack;
     res->compile_allocs = mem.total_allocs;

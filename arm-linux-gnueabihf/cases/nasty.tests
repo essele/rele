@@ -1,0 +1,123 @@
+N:greedyvslazy1
+D:greedy vs lazy repetition
+/a.*b
+T:a123b456b789b
+0:0,13
+
+N:greedyvslazy2
+D:greedy vs lazy repetition
+/a.*?b
+T:a123b456b789b
+0:0,5
+
+N:catastrophic1
+D:catastrophic backtracking (nested repeats)
+/^(a+)+b$
+T:aaaaaaaaaaaaaaaaab
+0:0,18
+1:0,17
+
+N:catastrophic2
+D:catastrophic backtracking with optional quantifiers
+/(a|aa)+b
+T:aaaaaaaaaaaaaaaaab
+0:0,18
+1:16,17
+
+N:optionalgroup
+D:optional groups with mixed content
+/(foo)?bar
+T:foobar
+0:0,6
+1:0,3
+
+N:nestedgroups
+D:deeply nested parentheses
+/(((a(b(c(d(e(f)g)h)i)j)k)l)m)n
+T:abcdefghijklmn
+0:0,14
+1:0,13
+2:0,12
+3:0,11
+4:1,10
+5:2,9
+6:3,8
+7:4,7
+8:5,6
+
+N:alternationlarge
+D:large alternation set
+/(cat|dog|fish|bird|mouse|snake|hamster|ferret|gecko|turtle)
+T:I have a hamster
+0:9,16
+1:9,16
+
+N:lazyhtml1
+D:greedy vs lazy HTML tag matching
+/<.*>
+T:<div><span>text</span></div>
+0:0,28
+
+N:lazyhtml2
+D:greedy vs lazy HTML tag matching
+/<.*?>
+T:<div><span>text</span></div>
+0:0,5
+
+N:escapedchars
+D:escaped special characters
+/a\+b
+T:a+b
+0:0,3
+
+N:backrefsimple
+D:backreference to previous group
+/(abc)\1
+T:abcabc
+0:0,6
+1:0,3
+
+N:backrefnested
+D:nested backreference
+/([ab]+)[bc]+\1
+T:aabcaa
+0:0,6
+1:0,2
+
+N:anchoredstartend
+D:anchored match beginning and end
+/^abc$
+T:abc
+0:0,3
+
+N:optionalquantifiers
+D:mix of ?, *, and + quantifiers
+/a?b*c+d
+T:aaabcccd
+0:2,8
+
+N:longalternation
+D:long literal alternation to stress parser
+/(one|two|three|four|five|six|seven|eight|nine|ten)
+T:nine
+0:0,4
+1:0,4
+
+N:zeroLengthMatch
+D:pattern that can match zero length
+/a*
+T:bbba
+0:0,0
+
+N:hexescape
+D:hex escape sequences
+/a\x62c
+T:abc
+0:0,3
+
+N:biginputslow
+D:potentially slow dot-star match on large input
+/^.*a$
+T:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxa
+0:0,65
+
