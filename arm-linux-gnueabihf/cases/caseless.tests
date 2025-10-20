@@ -1,5 +1,7 @@
-
-
+#
+# Some simple tests to check caseless operations
+# work as expected.
+#
 
 N:simpleicase
 /abc

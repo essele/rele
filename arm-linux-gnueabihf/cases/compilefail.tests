@@ -1,0 +1,10 @@
+#
+# Some test to check that compilation fails because
+# of errors in the expressions.
+#
+
+N:trainlingbackslash
+E:COMPFAIL
+/abc\
+T:irrelevant
+0:0,0
