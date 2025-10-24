@@ -34,6 +34,7 @@ void print_piece(const re2::StringPiece& sp) {
 static int re2_compile(char *pattern_c, int flags) {
     std::string pattern(pattern_c);
     RE2::Options options;
+    int rc;
 
     options.set_posix_syntax(false);   // Perl-style
     options.set_longest_match(false);  // Don’t use POSIX-style longest
@@ -52,9 +53,10 @@ static int re2_compile(char *pattern_c, int flags) {
     re2_regex = new RE2(pattern, options);
     if (!re2_regex->ok()) {
         // compilation failed
+        rc = re2_regex->error_code();
         delete re2_regex;
         re2_regex = nullptr;
-        return 0;
+        return -rc;
     }
 
     // number of capturing groups (this includes our wrapper outer group)
@@ -119,26 +121,6 @@ int re2_res_so(int i) {
 
 int re2_res_eo(int i) {
     return subs[i].data() ? (subs[i].data() - re2_subject.data() + subs[i].size()) : -1;
-}
-
-// start offset of group `res` (POSIX-style: 0=full match, 1..n = subgroups)
-static int Xre2_res_so(int res) {
-    if (re2_subs.empty()) return -1;
-    if (res < 0 || res >= (int)re2_subs.size()) return -1;
-    re2::StringPiece &sp = re2_subs[res];
-    if (sp.data() == nullptr) return -1;
-    ptrdiff_t off = sp.data() - re2_subject.data();
-    return (int)off;
-}
-
-// end offset (one past last character) of group `res`
-static int Xre2_res_eo(int res) {
-    if (re2_subs.empty()) return -1;
-    if (res < 0 || res >= (int)re2_subs.size()) return -1;
-    re2::StringPiece &sp = re2_subs[res];
-    if (sp.data() == nullptr) return -1;
-    ptrdiff_t off = sp.data() - re2_subject.data();
-    return (int)(off + sp.size());
 }
 
 static int re2_free() {

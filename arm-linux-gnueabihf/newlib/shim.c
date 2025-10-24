@@ -11,16 +11,15 @@ static regex_t         newlib_regex;
 static regmatch_t      pmatch[LIBC_MAX_GROUPS];
 
 static int newlib_compile(char *regex, int flags) {
-        int real_flags = REG_EXTENDED;
+    int rc;
+    int real_flags = REG_EXTENDED;
 
     if (flags & F_ICASE) real_flags |= REG_ICASE;
     if (flags & F_NEWLINE) real_flags |= REG_NEWLINE;
 
-    if (regcomp_nl(&newlib_regex, regex, real_flags)) {
-        // Compile Failed...
-        return 0;
-    }
-    return 1;
+    rc = regcomp_nl(&newlib_regex, regex, real_flags);
+    if (rc == 0) return 1;  // success
+    return -rc;             // failure
 }
 static int newlib_match(char *text, int flags) {
     int res = regexec_nl(&newlib_regex, text, LIBC_MAX_GROUPS, pmatch, 0);

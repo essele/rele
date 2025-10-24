@@ -12,16 +12,16 @@ static regmatch_t      pmatch[LIBC_MAX_GROUPS];
 
 static int tre_compile(char *regex, int flags) {
     int real_flags = REG_EXTENDED;
+    int rc;
 
     if (flags & F_ICASE) real_flags |= REG_ICASE;
     if (flags & F_NEWLINE) real_flags |= REG_NEWLINE;
 
-    if (tre_regcomp(&tre_regex, regex, real_flags)) {
-        // Compile Failed...
-        return 0;
-    }
-    return 1;
+    rc = tre_regcomp(&tre_regex, regex, real_flags);
+    if (rc == 0) return 1;  // success
+    return -rc;             // error
 }
+
 static int tre_match(char *text, int flags) {
     int res = tre_regexec(&tre_regex, text, LIBC_MAX_GROUPS, pmatch, 0);
     if (res) return 0;  // match failed

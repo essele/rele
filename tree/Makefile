@@ -3,10 +3,10 @@ CC = gcc
 CFLAGS = -02 -Wall
 
 
-tree:	tree.o librele.o
+tree:	tree.o rele.o
 	$(CC) $(FLAGS) -o $@ $^
 
-librele.o: ../librele/librele.c
+rele.o: ../rele/rele.c
 	$(CC) $(FLAGS) -o $@ -c $<
 
 %.o: %.c

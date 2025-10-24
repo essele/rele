@@ -141,6 +141,10 @@ int time_match(struct engine *eng, const struct testcase *test, struct results *
     return 1;
 }
 
+/**
+ * Test compilation, returns 1 on success, < 1 on failure.
+ * Compile_pass will be ok if COMPFAIL is set.
+ */
 int test_compile(struct engine *eng, const struct testcase *test, struct results *res) {
     int rc;
     struct memstats mem;
@@ -149,8 +153,6 @@ int test_compile(struct engine *eng, const struct testcase *test, struct results
     rc = eng->compile(test->regex, test->cflags);
     memstats_get(&mem);
     eng->free();
-
-    rc = rc ? 1 : 0;
 
     res->compile_stack = mem.total_stack;
     res->compile_allocs = mem.total_allocs;
@@ -320,6 +322,8 @@ int main(int argc, char *argv[]) {
             memset(&res, 0, sizeof(struct results));
 
             if (!test_compile(eng, test, &res)) goto results;
+            if (test->error & E_COMPFAIL) goto results;
+            if (res.compile_pass == 0) goto results;
             if (!test_match(eng, test, &res, cf_show_matches)) goto results;
 
             if (!cf_one) {
@@ -348,7 +352,7 @@ results:
                 if (!cf_one) {
                     fprintf(stderr, "Compile time:   %llu\n", res.compile_time);
                 }
-                if (res.compile_rc == 1) {
+                if (res.compile_pass == 1 && res.compile_rc == 1) {
                     fprintf(stderr, "Match status:   %s (rc=%d) (res=%s)\n", res.match_pass ? "PASS" : "FAIL", res.match_rc,
                                                                                                     res.match_resok ? "OK" : "FAIL");
                     fprintf(stderr, "Match memory:   stack [%d], allocs [%d], allocated [%d]\n", 

@@ -1,0 +1,27 @@
+#
+# Some basic tests just to provide a baseline level of memory, stack
+# and timing comparisons for relatively straightforward operations.
+#
+
+N:basic_simplematch
+D:match a simple three char regex
+/abc
+T:hereabcthere
+0: 4,7
+
+N:basic_groupmatch
+/(abc)
+T:hereabcthere
+0: 4,7
+1: 4,7
+
+N:basic_dotstar
+/.*abc
+T:somenewabnotuntilabcmore
+0:0,20
+
+N:basic_alt
+/(abc|def|ghi)
+T:xyzdeflmn
+0:3,6
+1:3,6

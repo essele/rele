@@ -17,14 +17,14 @@ static int subr_compile(char *regex, int flags) {
 //	strcat(last_regex, regex);
 //	strcat(last_regex, ".*");
 // This doesn't work, bug raised on the github
+	// Can't fail during compilation, since there isn't separate compile stage!
 	return 1;
 }
 static int subr_match(char *text, int flags) {
 	last_input = text;
 	capture_count = subreg_match(last_regex, text, captures, SUBR_MAX_GROUPS, 128);
 	if (capture_count < 0) {
-//		fprintf(stderr, "SUBREG error: %d\n", capture_count);
-		return 0;		// error
+		return capture_count;		// error
 	}
 	if (capture_count == 0) {
 		return 0; 		// no match

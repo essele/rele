@@ -12,7 +12,7 @@ main_blank: main.c
 main_libc:	main.c
 	$(CC) -DENGINE_LIBC=1 $(CFLAGS) -o $@ $^
 
-main_rele:	main.c ../librele/librele.c
+main_rele:	main.c ../rele/rele.c
 	$(CC) -DENGINE_RELE=1 $(CFLAGS) -o $@ $^
 
 main_trc: main.c ../arm-linux-gnueabihf/tiny-regex-c/tiny-regex-c/re.c

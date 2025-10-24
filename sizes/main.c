@@ -5,7 +5,7 @@
 #include <regex.h>
 #endif
 #ifdef ENGINE_RELE
-#include "../librele/rele.h"
+#include "../rele/rele.h"
 #endif
 #ifdef ENGINE_PCRE2
 #define PCRE2_CODE_UNIT_WIDTH 8

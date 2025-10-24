@@ -19,16 +19,22 @@ int libpcre_compile(char *regex, int flags) {
     if (flags & F_ICASE) real_flags |= PCRE2_CASELESS;
     if (flags & F_NEWLINE) real_flags |= PCRE2_MULTILINE;
 
-
     pcre_code = pcre2_compile((PCRE2_SPTR8)regex, PCRE2_ZERO_TERMINATED, real_flags, &errornumber, &erroroffset, NULL); 
-    if (!pcre_code) return 0;
-
+    if (!pcre_code) {
+        return -errornumber;
+    }
     match_data = pcre2_match_data_create_from_pattern(pcre_code, NULL);
     return 1;
 }
 int libpcre_match(char *text, int flags) {
-    pcre2_match(pcre_code, (PCRE2_SPTR8)text, strlen(text), 0, 0, match_data, NULL);
-    return 1;       // TODO
+    int rc;
+
+    rc = pcre2_match(pcre_code, (PCRE2_SPTR8)text, strlen(text), 0, 0, match_data, NULL);
+    if (rc < 0) {
+        if (rc == PCRE2_ERROR_NOMATCH) return 0;
+        return rc;
+    }
+    return 1;
 }
 int libpcre_res_count() {
     return pcre2_get_ovector_count(match_data);
@@ -42,8 +48,14 @@ int libpcre_res_eo(int res) {
     return (int)ovector[(res * 2) + 1];
 }
 int libpcre_free() {
-    pcre2_match_data_free(match_data);
-    pcre2_code_free(pcre_code);
+    if (match_data) {
+        pcre2_match_data_free(match_data);
+    }
+    if (pcre_code) {
+        pcre2_code_free(pcre_code);
+    }
+    match_data = NULL;
+    pcre_code = NULL;
     return 1;
 }
 

@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "../librele/rele.h"
+#include "../rele/rele.h"
 
 //
 // dot -Tpng tree.dot -o tree.png

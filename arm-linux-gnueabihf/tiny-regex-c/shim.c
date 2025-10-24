@@ -8,10 +8,9 @@ static int	mlen;
 
 static int tinyrc_compile(char *regex, int flags) {
 	ctx = re_compile(regex);
-	if (!ctx) return 0;
-	return 1;
+	if (!ctx) return 0;				// error
+	return 1;						// success
 }
-#include <stdio.h>
 static int tinyrc_match(char *text, int flags) {
 	offset = re_matchp(ctx, text, &mlen);
 	if (offset < 0) return 0;		// match failed

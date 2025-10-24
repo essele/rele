@@ -11,15 +11,14 @@ static regmatch_t      pmatch[LIBC_MAX_GROUPS];
 
 static int libc_compile(char *regex, int flags) {
     int real_flags = REG_EXTENDED;
+    int rc;
 
     if (flags & F_ICASE) real_flags |= REG_ICASE;
     if (flags & F_NEWLINE) real_flags |= REG_NEWLINE;
 
-    if (regcomp(&libc_regex, regex, real_flags)) {
-        // Compile Failed...
-        return 0;
-    }
-    return 1;
+    rc = regcomp(&libc_regex, regex, real_flags);
+    if (rc == 0) return 1;  // success
+    return -rc;             // failure code
 }
 static int libc_match(char *text, int flags) {
     int res = regexec(&libc_regex, text, LIBC_MAX_GROUPS, pmatch, 0);
