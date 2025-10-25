@@ -1,7 +1,0 @@
-
-Unfortunately it's impossible to get RE2 to compile for an embedded platform, primarily
-because of the reliance on Abseil.
-
-It's likely to be too large for a small platform anyway, but would have been good to be
-able to benchmark in a small 32bit mode.
-

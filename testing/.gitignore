@@ -1,4 +1,0 @@
-*.o
-test_cases.c
-memwrap.so
-test
